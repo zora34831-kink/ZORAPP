@@ -21,11 +21,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-storage.js";
 
 import {
-  ref as dbRef,
-  set,
-  onValue,
-  onDisconnect,
-  remove,
+  ref as dbRef, set, onValue, onDisconnect, remove,
   serverTimestamp as rtdbTimestamp
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-database.js";
 
@@ -34,10 +30,8 @@ import {
 // ======================================================
 
 const ADMIN_UID = "PbeBf6CtGLVWvX2RqnuvXBWyePG2";
-
 const $ = id => document.getElementById(id);
 const exists = id => Boolean($(id));
-
 const THEMES = ["neon", "dark", "light", "purple"];
 
 let currentUser = null;
@@ -47,12 +41,13 @@ let activeChatType = "private";
 
 let unsubscribers = [];
 let messageUnsubscribe = null;
+let typingUnsubscribe = null;
+let presenceUnsubscribe = null;
+
 let appListenersStarted = false;
 let toastTimer = null;
 let searchTimer = null;
 let typingTimer = null;
-let presenceUnsubscribe = null;
-let typingUnsubscribe = null;
 let firstMessageSnapshot = true;
 let lastNotificationTime = 0;
 let registrationInProgress = false;
@@ -64,29 +59,21 @@ const presenceCache = new Map();
 // ======================================================
 
 function on(id, event, callback) {
-  if (exists(id)) {
-    $(id).addEventListener(event, callback);
-  }
+  if (exists(id)) $(id).addEventListener(event, callback);
 }
 
 function setText(id, value) {
-  if (exists(id)) {
-    $(id).textContent = value ?? "";
-  }
+  if (exists(id)) $(id).textContent = value ?? "";
 }
 
 function setHidden(id, hidden) {
-  if (exists(id)) {
-    $(id).hidden = hidden;
-  }
+  if (exists(id)) $(id).hidden = hidden;
 }
 
 function safeElement(tag, className = "", text) {
   const el = document.createElement(tag);
-
   if (className) el.className = className;
   if (text !== undefined) el.textContent = text;
-
   return el;
 }
 
@@ -110,9 +97,7 @@ function errorMessage(error) {
     "unavailable": "Layanan sedang tidak tersedia."
   };
 
-  return messages[error?.code] ||
-    error?.message ||
-    "Terjadi kesalahan.";
+  return messages[error?.code] || error?.message || "Terjadi kesalahan.";
 }
 
 function formatTime(value) {
@@ -135,19 +120,15 @@ function formatLastSeen(timestamp) {
   if (!timestamp) return "Terakhir dilihat belum diketahui";
 
   const date = new Date(timestamp);
-
   if (Number.isNaN(date.getTime())) {
     return "Terakhir dilihat belum diketahui";
   }
 
-  return `Terakhir dilihat pukul ${date.toLocaleTimeString(
-    "id-ID",
-    {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false
-    }
-  )}`;
+  return `Terakhir dilihat pukul ${date.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  })}`;
 }
 
 function timestampMillis(value) {
@@ -177,7 +158,7 @@ function toast(message) {
 }
 
 // ======================================================
-// CUSTOM DIALOG
+// DIALOG
 // ======================================================
 
 function zoraDialog({
@@ -204,32 +185,20 @@ function zoraDialog({
     let field = null;
 
     if (input) {
-      field = document.createElement(
-        multiline ? "textarea" : "input"
-      );
-
+      field = document.createElement(multiline ? "textarea" : "input");
       field.className = "zora-dialog-input";
       field.placeholder = placeholder;
       field.value = defaultValue;
       field.maxLength = multiline ? 500 : 100;
 
-      if (multiline) {
-        field.rows = 4;
-      } else {
-        field.type = "text";
-      }
+      if (multiline) field.rows = 4;
+      else field.type = "text";
 
       card.append(field);
     }
 
     const actions = safeElement("div", "zora-dialog-actions");
-
-    const cancel = safeElement(
-      "button",
-      "zora-dialog-cancel",
-      cancelText
-    );
-
+    const cancel = safeElement("button", "zora-dialog-cancel", cancelText);
     const confirm = safeElement(
       "button",
       `zora-dialog-confirm${danger ? " danger" : ""}`,
@@ -237,7 +206,6 @@ function zoraDialog({
     );
 
     cancel.type = confirm.type = "button";
-
     actions.append(cancel, confirm);
     card.append(actions);
     overlay.append(card);
@@ -247,7 +215,6 @@ function zoraDialog({
 
     function close(value) {
       if (finished) return;
-
       finished = true;
       overlay.remove();
       document.removeEventListener("keydown", keyHandler);
@@ -277,7 +244,6 @@ function zoraDialog({
       }
 
       const value = field.value.trim();
-
       if (!value) {
         field.focus();
         return;
@@ -291,10 +257,7 @@ function zoraDialog({
     };
 
     document.addEventListener("keydown", keyHandler);
-
-    setTimeout(() => {
-      (field || confirm).focus();
-    }, 80);
+    setTimeout(() => (field || confirm).focus(), 80);
   });
 }
 
@@ -322,32 +285,19 @@ async function zoraPrompt(title, message, placeholder = "") {
 // ======================================================
 
 function createVerifiedBadge() {
-  const svg = document.createElementNS(
-    "http://www.w3.org/2000/svg",
-    "svg"
-  );
-
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("class", "verified-badge");
   svg.setAttribute("aria-label", "Akun terverifikasi");
 
-  const badge = document.createElementNS(
-    "http://www.w3.org/2000/svg",
-    "path"
-  );
-
+  const badge = document.createElementNS("http://www.w3.org/2000/svg", "path");
   badge.setAttribute(
     "d",
     "M12 1.5 14.4 3l3-.1 1.2 2.7 2.7 1.2-.1 3L22.5 12l-1.3 2.4.1 3-2.7 1.2-1.2 2.7-3-.1L12 22.5l-2.4-1.3-3 .1-1.2-2.7-2.7-1.2.1-3L1.5 12l1.3-2.4-.1-3 2.7-1.2 1.2-2.7 3 .1z"
   );
-
   badge.setAttribute("fill", "#2589f5");
 
-  const check = document.createElementNS(
-    "http://www.w3.org/2000/svg",
-    "path"
-  );
-
+  const check = document.createElementNS("http://www.w3.org/2000/svg", "path");
   check.setAttribute("d", "m7.5 12.2 3 3 6.2-6.4");
   check.setAttribute("fill", "none");
   check.setAttribute("stroke", "#fff");
@@ -356,31 +306,21 @@ function createVerifiedBadge() {
   check.setAttribute("stroke-linejoin", "round");
 
   svg.append(badge, check);
-
   return svg;
 }
 
 function renderVerifiedName(element, name, verified = false) {
-  if (typeof element === "string") {
-    element = $(element);
-  }
-
+  if (typeof element === "string") element = $(element);
   if (!element) return;
 
-  element.replaceChildren(
-    document.createTextNode(name || "Pengguna")
-  );
+  element.replaceChildren(document.createTextNode(name || "Pengguna"));
 
-  if (verified) {
-    element.append(createVerifiedBadge());
-  }
+  if (verified) element.append(createVerifiedBadge());
 }
 
 function createNameElement(name, verified = false) {
   const element = safeElement("strong");
-
   renderVerifiedName(element, name, verified);
-
   return element;
 }
 
@@ -389,6 +329,8 @@ function createNameElement(name, verified = false) {
 // ======================================================
 
 function renderAvatarInto(element, photoURL, name = "Z") {
+  if (!element) return;
+
   element.replaceChildren();
 
   if (!photoURL) {
@@ -397,13 +339,14 @@ function renderAvatarInto(element, photoURL, name = "Z") {
   }
 
   const image = document.createElement("img");
-
   image.src = photoURL;
   image.alt = "Foto profil";
   image.className = "avatar-photo";
 
   image.onerror = () => {
-    element.textContent = (name || "Z")[0].toUpperCase();
+    element.replaceChildren(
+      document.createTextNode((name || "Z")[0].toUpperCase())
+    );
   };
 
   element.append(image);
@@ -411,10 +354,7 @@ function renderAvatarInto(element, photoURL, name = "Z") {
 
 function renderAvatar(id, photoURL, name = "Z") {
   const element = $(id);
-
-  if (element) {
-    renderAvatarInto(element, photoURL, name);
-  }
+  if (element) renderAvatarInto(element, photoURL, name);
 }
 
 // ======================================================
@@ -434,12 +374,9 @@ function applyTheme(theme) {
 
   document.body.classList.add(`theme-${theme}`);
 
-  if (theme === "dark") {
-    document.body.classList.add("dark");
-  }
+  if (theme === "dark") document.body.classList.add("dark");
 
   localStorage.setItem("zora-theme", theme);
-
   setText("themeBtn", theme.toUpperCase());
   setText("settingsThemeBtn", `TEMA: ${theme.toUpperCase()}`);
 }
@@ -447,7 +384,6 @@ function applyTheme(theme) {
 function cycleTheme() {
   const current = localStorage.getItem("zora-theme") || "dark";
   const index = THEMES.indexOf(current);
-
   const next = THEMES[(index + 1) % THEMES.length];
 
   applyTheme(next);
@@ -456,7 +392,6 @@ function cycleTheme() {
 
 on("themeBtn", "click", cycleTheme);
 on("settingsThemeBtn", "click", cycleTheme);
-
 applyTheme(localStorage.getItem("zora-theme") || "dark");
 
 // ======================================================
@@ -464,10 +399,7 @@ applyTheme(localStorage.getItem("zora-theme") || "dark");
 // ======================================================
 
 function normalizeUsername(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^@+/, "")
-    .toLowerCase();
+  return String(value || "").trim().replace(/^@+/, "").toLowerCase();
 }
 
 function validUsername(value) {
@@ -513,7 +445,7 @@ async function claimUsername(username, uid, oldUsername = "") {
 }
 
 // ======================================================
-// CLEANUP
+// LISTENER CLEANUP
 // ======================================================
 
 function stopMessageListener() {
@@ -550,12 +482,15 @@ function cleanup() {
   stopTypingListener();
   stopPresenceListener();
 
+  clearTimeout(typingTimer);
+
   activeChat = null;
+  activeChatType = "private";
   appListenersStarted = false;
 }
 
 // ======================================================
-// PRESENCE: ONLINE / OFFLINE
+// PRESENCE
 // ======================================================
 
 async function setupPresence() {
@@ -564,54 +499,46 @@ async function setupPresence() {
   const connectedRef = dbRef(rtdb, ".info/connected");
   const statusRef = dbRef(rtdb, `status/${currentUser.uid}`);
 
-  presenceUnsubscribe = onValue(
-    connectedRef,
-    async snapshot => {
-      if (snapshot.val() !== true) return;
+  const unsubscribe = onValue(connectedRef, async snapshot => {
+    if (snapshot.val() !== true) return;
 
-      try {
-        await onDisconnect(statusRef).set({
-          state: "offline",
-          last_changed: rtdbTimestamp()
-        });
+    try {
+      await onDisconnect(statusRef).set({
+        state: "offline",
+        last_changed: rtdbTimestamp()
+      });
 
-        await set(statusRef, {
-          state: "online",
-          last_changed: rtdbTimestamp()
-        });
-      } catch (error) {
-        console.warn("Presence error:", error);
-      }
+      await set(statusRef, {
+        state: "online",
+        last_changed: rtdbTimestamp()
+      });
+    } catch (error) {
+      console.warn("Presence error:", error);
     }
-  );
+  });
+
+  unsubscribers.push(unsubscribe);
 }
 
 async function setOffline() {
   if (!currentUser) return;
 
   try {
-    await set(
-      dbRef(rtdb, `status/${currentUser.uid}`),
-      {
-        state: "offline",
-        last_changed: rtdbTimestamp()
-      }
-    );
+    await set(dbRef(rtdb, `status/${currentUser.uid}`), {
+      state: "offline",
+      last_changed: rtdbTimestamp()
+    });
   } catch (error) {
     console.warn(error);
   }
 }
 
 function listenPresence(uid, callback) {
-  const statusRef = dbRef(rtdb, `status/${uid}`);
-
   return onValue(
-    statusRef,
+    dbRef(rtdb, `status/${uid}`),
     snapshot => {
       const data = snapshot.val();
-
       presenceCache.set(uid, data || null);
-
       callback(data || null);
     },
     error => {
@@ -622,18 +549,16 @@ function listenPresence(uid, callback) {
 }
 
 // ======================================================
-// TYPING INDICATOR
+// TYPING
 // ======================================================
 
 function typingPath() {
   if (!activeChat || !currentUser) return null;
-
   return `typing/${activeChatType}_${activeChat.id}/${currentUser.uid}`;
 }
 
 async function updateTyping(isTyping) {
   const path = typingPath();
-
   if (!path) return;
 
   try {
@@ -653,38 +578,6 @@ async function updateTyping(isTyping) {
   }
 }
 
-function listenTyping() {
-  stopTypingListener();
-
-  if (!activeChat || !currentUser) return;
-
-  const path = `typing/${activeChatType}_${activeChat.id}`;
-
-  typingUnsubscribe = onValue(
-    dbRef(rtdb, path),
-    snapshot => {
-      const users = snapshot.val() || {};
-
-      const typingUsers = Object.entries(users)
-        .filter(([uid, data]) => (
-          uid !== currentUser.uid &&
-          data?.typing === true &&
-          Date.now() - Number(data.updatedAt || 0) < 12000
-        ));
-
-      let text = "";
-
-      if (typingUsers.length === 1) {
-        text = `${typingUsers[0][1].name || "Pengguna"} sedang mengetik...`;
-      } else if (typingUsers.length > 1) {
-        text = "Beberapa orang sedang mengetik...";
-      }
-
-      setTypingIndicator(text);
-    }
-  );
-}
-
 function setTypingIndicator(text) {
   let element = $("typingIndicator");
 
@@ -696,28 +589,49 @@ function setTypingIndicator(text) {
     element.id = "typingIndicator";
 
     const messages = $("messages");
-
-    if (messages) {
-      messages.before(element);
-    } else {
-      panel.append(element);
-    }
+    if (messages) messages.before(element);
+    else panel.append(element);
   }
 
   element.textContent = text || "";
   element.hidden = !text;
 }
 
+function listenTyping() {
+  stopTypingListener();
+
+  if (!activeChat || !currentUser) return;
+
+  const path = `typing/${activeChatType}_${activeChat.id}`;
+
+  typingUnsubscribe = onValue(dbRef(rtdb, path), snapshot => {
+    const users = snapshot.val() || {};
+
+    const typingUsers = Object.entries(users).filter(([uid, data]) =>
+      uid !== currentUser.uid &&
+      data?.typing === true &&
+      Date.now() - Number(data.updatedAt || 0) < 12000
+    );
+
+    let text = "";
+
+    if (typingUsers.length === 1) {
+      text = `${typingUsers[0][1].name || "Pengguna"} sedang mengetik...`;
+    } else if (typingUsers.length > 1) {
+      text = "Beberapa orang sedang mengetik...";
+    }
+
+    setTypingIndicator(text);
+  });
+}
+
 on("messageInput", "input", () => {
   if (!activeChat || activeChatType === "channel") return;
 
   updateTyping(true);
-
   clearTimeout(typingTimer);
 
-  typingTimer = setTimeout(() => {
-    updateTyping(false);
-  }, 1800);
+  typingTimer = setTimeout(() => updateTyping(false), 1800);
 });
 
 // ======================================================
@@ -766,9 +680,7 @@ on("registerBtn", "click", async () => {
   const name = $("authName")?.value.trim();
   const email = $("registerEmail")?.value.trim();
   const password = $("registerPassword")?.value;
-  const username = normalizeUsername(
-    $("registerUsername")?.value
-  );
+  const username = normalizeUsername($("registerUsername")?.value);
 
   setText("registerError", "");
 
@@ -778,10 +690,7 @@ on("registerBtn", "click", async () => {
   }
 
   if (name.length < 3 || password.length < 8) {
-    setText(
-      "registerError",
-      "Nama minimal 3 karakter dan password minimal 8 karakter."
-    );
+    setText("registerError", "Nama minimal 3 karakter dan password minimal 8 karakter.");
     return;
   }
 
@@ -793,14 +702,8 @@ on("registerBtn", "click", async () => {
   $("registerBtn").disabled = true;
   registrationInProgress = true;
 
-  let credential = null;
-
   try {
-    credential = await createUserWithEmailAndPassword(
-      auth,
-      email,
-      password
-    );
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
 
     await claimUsername(username, credential.user.uid);
 
@@ -823,7 +726,6 @@ on("registerBtn", "click", async () => {
     $("registerEmail").value = "";
     $("registerPassword").value = "";
     $("registerUsername").value = "";
-
     $("authEmail").value = email;
 
     setHidden("registerMode", true);
@@ -844,7 +746,6 @@ on("registerBtn", "click", async () => {
 
 function createProfilePhotoControls() {
   const modal = $("profileModal");
-
   if (!modal || exists("profilePhotoControls")) return;
 
   const controls = safeElement("div", "profile-photo-editor");
@@ -853,16 +754,10 @@ function createProfilePhotoControls() {
   const preview = safeElement("div", "profile-photo-preview");
   preview.id = "profilePhotoPreview";
 
-  const label = safeElement(
-    "label",
-    "photo-upload-button",
-    "Ganti Foto Profil"
-  );
-
+  const label = safeElement("label", "photo-upload-button", "Ganti Foto Profil");
   label.htmlFor = "profilePhotoInput";
 
   const input = document.createElement("input");
-
   input.type = "file";
   input.id = "profilePhotoInput";
   input.accept = "image/jpeg,image/png,image/webp";
@@ -870,7 +765,6 @@ function createProfilePhotoControls() {
 
   input.onchange = event => {
     const file = event.target.files?.[0];
-
     if (file) uploadProfilePhoto(file);
   };
 
@@ -882,7 +776,6 @@ function createProfilePhotoControls() {
   );
 
   const card = modal.querySelector(".modal-card");
-
   (card || modal).prepend(controls);
 }
 
@@ -900,38 +793,21 @@ async function uploadProfilePhoto(file) {
   }
 
   const input = $("profilePhotoInput");
-
   if (input) input.disabled = true;
 
   try {
-    const imageRef = ref(
-      storage,
-      `profilePhotos/${currentUser.uid}/avatar`
-    );
+    const imageRef = ref(storage, `profilePhotos/${currentUser.uid}/avatar`);
 
-    await uploadBytes(imageRef, file, {
-      contentType: file.type
-    });
+    await uploadBytes(imageRef, file, { contentType: file.type });
 
     const photoURL = await getDownloadURL(imageRef);
 
-    await updateDoc(doc(db, "users", currentUser.uid), {
-      photoURL
-    });
+    await updateDoc(doc(db, "users", currentUser.uid), { photoURL });
 
     currentProfile.photoURL = photoURL;
 
-    renderAvatar(
-      "profilePhotoPreview",
-      photoURL,
-      currentProfile.name
-    );
-
-    renderAvatar(
-      "myAvatar",
-      photoURL,
-      currentProfile.name
-    );
+    renderAvatar("profilePhotoPreview", photoURL, currentProfile.name);
+    renderAvatar("myAvatar", photoURL, currentProfile.name);
 
     toast("Foto profil diperbarui.");
   } catch (error) {
@@ -963,7 +839,6 @@ onAuthStateChanged(auth, user => {
     ].forEach(id => setHidden(id, true));
 
     setHidden("authScreen", false);
-
     return;
   }
 
@@ -1035,11 +910,7 @@ onAuthStateChanged(auth, user => {
 
       setText("myEmail", user.email || "");
 
-      renderAvatar(
-        "myAvatar",
-        currentProfile.photoURL,
-        currentProfile.name
-      );
+      renderAvatar("myAvatar", currentProfile.photoURL, currentProfile.name);
 
       setHidden("openAdmin", !isAdmin());
 
@@ -1055,7 +926,6 @@ onAuthStateChanged(auth, user => {
         appListenersStarted = true;
 
         setupPresence();
-
         listenChats();
         listenStatuses();
         listenGroups();
@@ -1091,10 +961,7 @@ async function logout() {
 ].forEach(id => on(id, "click", logout));
 
 on("verifyAccountBtn", "click", async () => {
-  if (
-    !currentUser ||
-    currentProfile?.status !== "recovered"
-  ) return;
+  if (!currentUser || currentProfile?.status !== "recovered") return;
 
   try {
     await updateDoc(doc(db, "users", currentUser.uid), {
@@ -1119,19 +986,14 @@ function openPage(pageId) {
   });
 
   document.querySelectorAll(".nav-button").forEach(button => {
-    button.classList.toggle(
-      "active",
-      button.dataset.page === pageId
-    );
+    button.classList.toggle("active", button.dataset.page === pageId);
   });
 
   $("appScreen")?.classList.remove("chat-open");
 }
 
 document.querySelectorAll(".nav-button").forEach(button => {
-  button.addEventListener("click", () => {
-    openPage(button.dataset.page);
-  });
+  button.addEventListener("click", () => openPage(button.dataset.page));
 });
 
 on("backToChats", "click", () => {
@@ -1140,20 +1002,19 @@ on("backToChats", "click", () => {
 });
 
 // ======================================================
-// CONVERSATION HEADER
+// CONVERSATION
 // ======================================================
 
 function createChatSecurityNotice() {
   const panel = $("chatPanel");
-
   if (!panel || exists("chatSecurityNotice")) return;
 
   const notice = safeElement("div", "chat-security-notice");
   notice.id = "chatSecurityNotice";
 
-  const text = safeElement("div", "security-copy");
+  const copy = safeElement("div", "security-copy");
 
-  text.append(
+  copy.append(
     safeElement("strong", "", "Privasi percakapan"),
     safeElement(
       "small",
@@ -1162,10 +1023,7 @@ function createChatSecurityNotice() {
     )
   );
 
-  notice.append(
-    safeElement("span", "security-mark", "i"),
-    text
-  );
+  notice.append(safeElement("span", "security-mark", "i"), copy);
 
   const header = panel.querySelector(".conversation-header");
 
@@ -1174,16 +1032,19 @@ function createChatSecurityNotice() {
 }
 
 function showConversation(name, verified = false) {
+  stopPresenceListener();
+  stopTypingListener();
+
+  $("channelControls")?.remove();
+  $("inviteGroupMember")?.remove();
+  $("chatPresence")?.remove();
+  $("typingIndicator")?.remove();
+
   setHidden("emptyChat", true);
   setHidden("chatPanel", false);
 
   renderVerifiedName("chatName", name, verified);
-
-  renderAvatar(
-    "chatAvatar",
-    activeChat?.photoURL,
-    name
-  );
+  renderAvatar("chatAvatar", activeChat?.photoURL, name);
 
   createChatSecurityNotice();
 
@@ -1210,13 +1071,9 @@ function updateComposerAccess() {
   composer.hidden = !canPost;
   send.hidden = !canPost;
 
-  if (image) {
-    image.hidden = !canPost;
-  }
+  if (image) image.disabled = !canPost;
 
-  if (isChannel && !canPost) {
-    composer.value = "";
-  }
+  if (isChannel && !canPost) composer.value = "";
 
   composer.placeholder = isChannel
     ? "Tulis postingan saluran..."
@@ -1241,9 +1098,7 @@ async function findExistingPrivateChat(otherUid) {
 
   const matches = snap.docs.filter(item => {
     const members = item.data().members || [];
-
-    return members.length === 2 &&
-      members.includes(otherUid);
+    return members.length === 2 && members.includes(otherUid);
   });
 
   if (!matches.length) return null;
@@ -1260,11 +1115,12 @@ async function openPrivateChat(other) {
   if (!currentUser || !other?.uid) return;
 
   try {
+    stopMessageListener();
+    stopPresenceListener();
+    stopTypingListener();
+
     const existing = await findExistingPrivateChat(other.uid);
-
-    const id = existing?.id ||
-      privateChatId(currentUser.uid, other.uid);
-
+    const id = existing?.id || privateChatId(currentUser.uid, other.uid);
     const chatRef = doc(db, "chats", id);
 
     if (!existing) {
@@ -1298,10 +1154,7 @@ async function openPrivateChat(other) {
     );
 
     const hiddenSnap = await getDoc(hiddenRef);
-
-    if (hiddenSnap.exists()) {
-      await deleteDoc(hiddenRef);
-    }
+    if (hiddenSnap.exists()) await deleteDoc(hiddenRef);
 
     activeChat = {
       id,
@@ -1313,11 +1166,7 @@ async function openPrivateChat(other) {
 
     activeChatType = "private";
 
-    showConversation(
-      activeChat.name,
-      activeChat.verified
-    );
-
+    showConversation(activeChat.name, activeChat.verified);
     listenMessages("chats", id);
     listenTyping();
     listenOtherPresence(other.uid);
@@ -1327,27 +1176,24 @@ async function openPrivateChat(other) {
 }
 
 // ======================================================
-// LAST SEEN
+// PRESENCE HEADER
 // ======================================================
 
 function listenOtherPresence(uid) {
-  const old = $("chatPresence");
+  stopPresenceListener();
+  $("chatPresence")?.remove();
 
-  if (old) old.remove();
-
-  const panel = $("chatPanel");
-  const header = panel?.querySelector(".conversation-header");
-
+  const header = $("chatPanel")?.querySelector(".conversation-header");
   if (!header) return;
 
   const element = safeElement("small", "chat-presence");
   element.id = "chatPresence";
-
   header.append(element);
 
-  const unsubscribe = listenPresence(uid, data => {
+  presenceUnsubscribe = listenPresence(uid, data => {
     if (!data) {
-      element.textContent = "Trạngi tidak diketahui";
+      element.textContent = "Status tidak diketahui";
+      element.classList.remove("is-online");
       return;
     }
 
@@ -1359,8 +1205,6 @@ function listenOtherPresence(uid) {
       element.textContent = formatLastSeen(data.last_changed);
     }
   });
-
-  unsubscribers.push(unsubscribe);
 }
 
 // ======================================================
@@ -1386,7 +1230,6 @@ async function createGroup() {
     });
 
     toast("Grup berhasil dibuat.");
-
     openGroup(group.id, name.trim());
   } catch (error) {
     toast(errorMessage(error));
@@ -1409,27 +1252,24 @@ function listenGroups() {
 
       list.replaceChildren();
 
+      if (snap.empty) {
+        list.append(safeElement("div", "chat-empty-note", "Belum ada grup."));
+        return;
+      }
+
       snap.forEach(item => {
         const group = item.data();
-
         const row = safeElement("div", "chat-item");
         const avatar = safeElement("div", "avatar", "G");
         const details = safeElement("div", "chat-item-details");
 
         details.append(
           safeElement("strong", "", group.name || "Grup"),
-          safeElement(
-            "small",
-            "",
-            `${group.members?.length || 1} anggota`
-          )
+          safeElement("small", "", `${group.members?.length || 1} anggota`)
         );
 
         row.append(avatar, details);
-
-        row.onclick = () => {
-          openGroup(item.id, group.name);
-        };
+        row.onclick = () => openGroup(item.id, group.name || "Grup");
 
         list.append(row);
       });
@@ -1455,25 +1295,17 @@ async function inviteGroupMember(groupId) {
     const groupRef = doc(db, "groups", groupId);
     const groupSnap = await getDoc(groupRef);
 
-    if (!groupSnap.exists()) {
-      throw new Error("Grup tidak ditemukan.");
-    }
+    if (!groupSnap.exists()) throw new Error("Grup tidak ditemukan.");
 
     const group = groupSnap.data();
 
-    if (
-      !group.members?.includes(currentUser.uid)
-    ) {
+    if (!group.members?.includes(currentUser.uid)) {
       throw new Error("Lu bukan anggota grup ini.");
     }
 
-    const usernameSnap = await getDoc(
-      doc(db, "usernames", username)
-    );
+    const usernameSnap = await getDoc(doc(db, "usernames", username));
 
-    if (!usernameSnap.exists()) {
-      throw new Error("Username tidak ditemukan.");
-    }
+    if (!usernameSnap.exists()) throw new Error("Username tidak ditemukan.");
 
     const uid = usernameSnap.data().uid;
 
@@ -1494,6 +1326,10 @@ async function inviteGroupMember(groupId) {
 }
 
 function openGroup(id, name) {
+  stopMessageListener();
+  stopPresenceListener();
+  stopTypingListener();
+
   activeChat = { id, name };
   activeChatType = "group";
 
@@ -1510,9 +1346,7 @@ function openGroup(id, name) {
 
     inviteButton.id = "inviteGroupMember";
 
-    $("chatPanel")?.querySelector(
-      ".conversation-header"
-    )?.append(inviteButton);
+    $("chatPanel")?.querySelector(".conversation-header")?.append(inviteButton);
   }
 
   inviteButton.hidden = false;
@@ -1551,12 +1385,7 @@ on("createChannelBtn", "click", async () => {
     });
 
     toast("Saluran berhasil dibuat.");
-
-    openChannel(
-      channel.id,
-      name.trim(),
-      currentUser.uid
-    );
+    await openChannel(channel.id, name.trim(), currentUser.uid);
   } catch (error) {
     toast(errorMessage(error));
   }
@@ -1577,30 +1406,61 @@ function listenChannels() {
 
       list.replaceChildren();
 
+      if (snap.empty) {
+        list.append(safeElement("div", "chat-empty-note", "Belum ada saluran."));
+        return;
+      }
+
       snap.forEach(item => {
         const channel = item.data();
+        const followers = channel.followers || [];
+        const following = followers.includes(currentUser.uid);
+        const owner = channel.owner === currentUser.uid;
 
         const row = safeElement("div", "chat-item");
         const avatar = safeElement("div", "avatar", "S");
-        const details = safeElement("div", "chat-item-details");
+
+        const details = safeElement(
+          "div",
+          "chat-item-details channel-item-details"
+        );
 
         details.append(
           safeElement("strong", "", channel.name || "Saluran"),
           safeElement(
             "small",
-            "",
-            `${channel.followers?.length || 0} pengikut`
+            "channel-followers",
+            `${followers.length} pengikut`
+          ),
+          safeElement(
+            "small",
+            "channel-description",
+            channel.description || "Saluran publik"
           )
         );
 
         row.append(avatar, details);
 
-        row.onclick = () => {
-          openChannel(
-            item.id,
-            channel.name,
-            channel.owner
+        if (!owner) {
+          const follow = safeElement(
+            "button",
+            following
+              ? "secondary-btn channel-follow-btn"
+              : "primary-btn channel-follow-btn",
+            following ? "Mengikuti" : "Ikuti"
           );
+
+          follow.type = "button";
+          follow.onclick = async event => {
+            event.stopPropagation();
+            await toggleFollowChannel(item.id);
+          };
+
+          row.append(follow);
+        }
+
+        row.onclick = () => {
+          openChannel(item.id, channel.name || "Saluran", channel.owner);
         };
 
         list.append(row);
@@ -1617,13 +1477,10 @@ async function toggleFollowChannel(channelId) {
     const channelRef = doc(db, "channels", channelId);
     const snap = await getDoc(channelRef);
 
-    if (!snap.exists()) {
-      throw new Error("Saluran tidak ditemukan.");
-    }
+    if (!snap.exists()) throw new Error("Saluran tidak ditemukan.");
 
     const channel = snap.data();
     const followers = channel.followers || [];
-
     const following = followers.includes(currentUser.uid);
 
     await updateDoc(channelRef, {
@@ -1632,13 +1489,12 @@ async function toggleFollowChannel(channelId) {
         : arrayUnion(currentUser.uid)
     });
 
-    toast(
-      following
-        ? "Berhenti mengikuti saluran."
-        : "Berhasil mengikuti saluran."
+    toast(following
+      ? "Berhenti mengikuti saluran."
+      : "Berhasil mengikuti saluran."
     );
 
-    if (activeChat?.id === channelId) {
+    if (activeChat?.id === channelId && activeChatType === "channel") {
       activeChat.followers = following
         ? followers.filter(uid => uid !== currentUser.uid)
         : [...followers, currentUser.uid];
@@ -1652,7 +1508,6 @@ async function toggleFollowChannel(channelId) {
 
 function renderChannelControls() {
   const channel = activeChat;
-
   if (!channel || activeChatType !== "channel") return;
 
   let controls = $("channelControls");
@@ -1661,27 +1516,22 @@ function renderChannelControls() {
     controls = safeElement("div", "channel-controls");
     controls.id = "channelControls";
 
-    const header = $("chatPanel")?.querySelector(
-      ".conversation-header"
-    );
-
+    const header = $("chatPanel")?.querySelector(".conversation-header");
     if (header) header.after(controls);
   }
 
   controls.replaceChildren();
 
-  const count = safeElement(
-    "span",
-    "channel-follower-count",
-    `${channel.followers?.length || 0} pengikut`
+  controls.append(
+    safeElement(
+      "span",
+      "channel-follower-count",
+      `${channel.followers?.length || 0} pengikut`
+    )
   );
-
-  controls.append(count);
 
   const owner = channel.owner === currentUser.uid;
-  const following = (channel.followers || []).includes(
-    currentUser.uid
-  );
+  const following = (channel.followers || []).includes(currentUser.uid);
 
   if (!owner) {
     const button = safeElement(
@@ -1692,7 +1542,6 @@ function renderChannelControls() {
 
     button.type = "button";
     button.onclick = () => toggleFollowChannel(channel.id);
-
     controls.append(button);
   }
 
@@ -1701,111 +1550,97 @@ function renderChannelControls() {
 
 async function openChannel(id, name, owner) {
   stopMessageListener();
+  stopPresenceListener();
+  stopTypingListener();
 
-  const snap = await getDoc(doc(db, "channels", id));
+  try {
+    const snap = await getDoc(doc(db, "channels", id));
 
-  if (!snap.exists()) {
-    toast("Saluran tidak ditemukan.");
-    return;
-  }
+    if (!snap.exists()) {
+      toast("Saluran tidak ditemukan.");
+      return;
+    }
 
-  const channel = snap.data();
+    const channel = snap.data();
 
-  activeChat = {
-    id,
-    name,
-    owner,
-    followers: channel.followers || []
-  };
+    activeChat = {
+      id,
+      name: channel.name || name,
+      owner: channel.owner || owner,
+      followers: channel.followers || []
+    };
 
-  activeChatType = "channel";
+    activeChatType = "channel";
 
-  showConversation(name, false);
+    showConversation(activeChat.name, false);
+    renderChannelControls();
 
-  renderChannelControls();
+    const q = query(
+      collection(db, "channels", id, "posts"),
+      orderBy("createdAt", "asc"),
+      limit(100)
+    );
 
-  const q = query(
-    collection(db, "channels", id, "posts"),
-    orderBy("createdAt", "asc"),
-    limit(100)
-  );
+    messageUnsubscribe = onSnapshot(
+      q,
+      snapshot => {
+        if (activeChat?.id !== id || activeChatType !== "channel") return;
 
-  messageUnsubscribe = onSnapshot(
-    q,
-    snapshot => {
-      const container = $("messages");
-      if (!container) return;
+        const container = $("messages");
+        if (!container) return;
 
-      container.replaceChildren();
+        container.replaceChildren();
 
-      snapshot.forEach(item => {
-        const post = item.data();
-        const bubble = safeElement("div", "bubble");
+        snapshot.forEach(item => {
+          const post = item.data();
+          const bubble = safeElement("div", "bubble");
 
-        bubble.append(
-          safeElement(
-            "div",
-            "message-body",
-            post.text || ""
-          ),
-          safeElement(
-            "small",
-            "",
-            `${post.authorName || "Admin"} · ${formatTime(post.createdAt)}`
-          )
-        );
-
-        if (
-          post.uid === currentUser.uid ||
-          isAdmin()
-        ) {
-          const del = safeElement(
-            "button",
-            "message-delete",
-            "Hapus"
+          bubble.append(
+            safeElement("div", "message-body", post.text || ""),
+            safeElement(
+              "small",
+              "",
+              `${post.authorName || "Admin"} · ${formatTime(post.createdAt)}`
+            )
           );
 
-          del.type = "button";
+          if (post.uid === currentUser.uid || isAdmin()) {
+            const del = safeElement("button", "message-delete", "Hapus");
+            del.type = "button";
 
-          del.onclick = async () => {
-            const confirmed = await zoraConfirm(
-              "Hapus postingan ini?",
-              {
-                title: "Hapus postingan",
-                confirmText: "Hapus",
-                danger: true
-              }
-            );
-
-            if (!confirmed) return;
-
-            try {
-              await deleteDoc(
-                doc(
-                  db,
-                  "channels",
-                  id,
-                  "posts",
-                  item.id
-                )
+            del.onclick = async () => {
+              const confirmed = await zoraConfirm(
+                "Hapus postingan ini?",
+                {
+                  title: "Hapus postingan",
+                  confirmText: "Hapus",
+                  danger: true
+                }
               );
 
-              toast("Postingan dihapus.");
-            } catch (error) {
-              toast(errorMessage(error));
-            }
-          };
+              if (!confirmed) return;
 
-          bubble.append(del);
-        }
+              try {
+                await deleteDoc(doc(db, "channels", id, "posts", item.id));
+                toast("Postingan dihapus.");
+              } catch (error) {
+                toast(errorMessage(error));
+              }
+            };
 
-        container.append(bubble);
-      });
+            bubble.append(del);
+          }
 
-      container.scrollTop = container.scrollHeight;
-    },
-    error => toast(errorMessage(error))
-  );
+          container.append(bubble);
+        });
+
+        container.scrollTop = container.scrollHeight;
+      },
+      error => toast(errorMessage(error))
+    );
+  } catch (error) {
+    toast(errorMessage(error));
+  }
 }
 
 // ======================================================
@@ -1814,16 +1649,10 @@ async function openChannel(id, name, owner) {
 
 function createMessageActionMenu(messageRef, data) {
   const wrapper = safeElement("div", "message-actions");
-
-  const trigger = safeElement(
-    "button",
-    "message-menu-trigger",
-    "⋯"
-  );
+  const trigger = safeElement("button", "message-menu-trigger", "⋯");
+  const menu = safeElement("div", "message-menu");
 
   trigger.type = "button";
-
-  const menu = safeElement("div", "message-menu");
   menu.hidden = true;
 
   trigger.onclick = event => {
@@ -1836,12 +1665,7 @@ function createMessageActionMenu(messageRef, data) {
     menu.hidden = !menu.hidden;
   };
 
-  const hide = safeElement(
-    "button",
-    "",
-    "Hapus untuk saya"
-  );
-
+  const hide = safeElement("button", "", "Hapus untuk saya");
   hide.type = "button";
 
   hide.onclick = async () => {
@@ -1858,10 +1682,7 @@ function createMessageActionMenu(messageRef, data) {
 
   menu.append(hide);
 
-  if (
-    data.sender === currentUser.uid &&
-    !data.deleted
-  ) {
+  if (data.sender === currentUser.uid && !data.deleted) {
     const removeAll = safeElement(
       "button",
       "danger-option",
@@ -1897,7 +1718,6 @@ function createMessageActionMenu(messageRef, data) {
   }
 
   wrapper.append(trigger, menu);
-
   return wrapper;
 }
 
@@ -1906,23 +1726,14 @@ function createMessageActionMenu(messageRef, data) {
 // ======================================================
 
 function makeDoubleTick(isRead) {
-  const svg = document.createElementNS(
-    "http://www.w3.org/2000/svg",
-    "svg"
-  );
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 
   svg.setAttribute("viewBox", "0 0 22 16");
   svg.setAttribute("width", "19");
   svg.setAttribute("height", "14");
-  svg.setAttribute(
-    "class",
-    `message-ticks${isRead ? " read" : ""}`
-  );
+  svg.setAttribute("class", `message-ticks${isRead ? " read" : ""}`);
 
-  const path = document.createElementNS(
-    "http://www.w3.org/2000/svg",
-    "path"
-  );
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
 
   path.setAttribute(
     "d",
@@ -1936,7 +1747,6 @@ function makeDoubleTick(isRead) {
   path.setAttribute("stroke-linejoin", "round");
 
   svg.append(path);
-
   return svg;
 }
 
@@ -1946,7 +1756,6 @@ function makeDoubleTick(isRead) {
 
 function listenMessages(root, id) {
   stopMessageListener();
-
   firstMessageSnapshot = true;
 
   const q = query(
@@ -1958,6 +1767,8 @@ function listenMessages(root, id) {
   messageUnsubscribe = onSnapshot(
     q,
     async snap => {
+      if (activeChat?.id !== id) return;
+
       const container = $("messages");
       if (!container) return;
 
@@ -1968,19 +1779,16 @@ function listenMessages(root, id) {
           const data = change.doc.data();
 
           if (data.sender !== currentUser.uid) {
-            const viewing = activeChat?.id === id &&
-              !document.hidden;
+            const now = Date.now();
 
-            if (!viewing) {
-              const now = Date.now();
-
-              if (now - lastNotificationTime > 500) {
-                lastNotificationTime = now;
-
-                toast(
-                  `${data.senderName || "Pesan baru"}: ${(data.text || "").slice(0, 60)}`
-                );
-              }
+            if (
+              document.hidden &&
+              now - lastNotificationTime > 500
+            ) {
+              lastNotificationTime = now;
+              toast(
+                `${data.senderName || "Pesan baru"}: ${(data.text || "").slice(0, 60)}`
+              );
             }
           }
         });
@@ -1993,12 +1801,9 @@ function listenMessages(root, id) {
 
       snap.forEach(item => {
         const data = item.data();
-
         const mine = data.sender === currentUser.uid;
 
-        if ((data.deletedFor || []).includes(currentUser.uid)) {
-          return;
-        }
+        if ((data.deletedFor || []).includes(currentUser.uid)) return;
 
         if (
           !mine &&
@@ -2017,16 +1822,9 @@ function listenMessages(root, id) {
           `bubble${mine ? " mine" : ""}${data.deleted ? " deleted-message" : ""}`
         );
 
-        if (
-          activeChatType === "group" &&
-          !mine
-        ) {
+        if (activeChatType === "group" && !mine) {
           bubble.append(
-            safeElement(
-              "strong",
-              "message-sender",
-              data.senderName || "Pengguna"
-            )
+            safeElement("strong", "message-sender", data.senderName || "Pengguna")
           );
         }
 
@@ -2034,44 +1832,29 @@ function listenMessages(root, id) {
           safeElement(
             "div",
             "message-body",
-            data.deleted
-              ? "Pesan ini telah dihapus"
-              : data.text || ""
+            data.deleted ? "Pesan ini telah dihapus" : data.text || ""
           )
         );
 
         const footer = safeElement("div", "message-footer");
+        footer.append(safeElement("small", "", formatTime(data.createdAt)));
 
-        footer.append(
-          safeElement("small", "", formatTime(data.createdAt))
-        );
-
-        if (
-          mine &&
-          activeChatType === "private" &&
-          !data.deleted
-        ) {
+        if (mine && activeChatType === "private" && !data.deleted) {
           footer.append(
-            makeDoubleTick(
-              (data.readBy || []).includes(activeChat.uid)
-            )
+            makeDoubleTick((data.readBy || []).includes(activeChat.uid))
           );
         }
 
         bubble.append(footer);
 
         if (!data.deleted) {
-          bubble.append(
-            createMessageActionMenu(item.ref, data)
-          );
+          bubble.append(createMessageActionMenu(item.ref, data));
         }
 
         container.append(bubble);
       });
 
-      if (readUpdates.length) {
-        await Promise.all(readUpdates);
-      }
+      if (readUpdates.length) await Promise.all(readUpdates);
 
       container.scrollTop = container.scrollHeight;
     },
@@ -2089,41 +1872,27 @@ async function sendMessage(text) {
   }
 
   const cleanText = text.trim();
-
   if (!cleanText) return;
 
   if (activeChatType === "channel") {
-    const allowed =
-      isAdmin() ||
-      activeChat.owner === currentUser.uid;
+    const allowed = isAdmin() || activeChat.owner === currentUser.uid;
 
     if (!allowed) {
       throw new Error("Hanya admin saluran yang boleh posting.");
     }
 
-    await addDoc(
-      collection(db, "channels", activeChat.id, "posts"),
-      {
-        uid: currentUser.uid,
-        authorName: currentProfile?.name || "Admin",
-        text: cleanText,
-        createdAt: serverTimestamp()
-      }
-    );
+    await addDoc(collection(db, "channels", activeChat.id, "posts"), {
+      uid: currentUser.uid,
+      authorName: currentProfile?.name || "Admin",
+      text: cleanText,
+      createdAt: serverTimestamp()
+    });
 
     return;
   }
 
-  const root = activeChatType === "group"
-    ? "groups"
-    : "chats";
-
-  const conversationRef = doc(
-    db,
-    root,
-    activeChat.id
-  );
-
+  const root = activeChatType === "group" ? "groups" : "chats";
+  const conversationRef = doc(db, root, activeChat.id);
   const conversationSnap = await getDoc(conversationRef);
 
   if (!conversationSnap.exists()) {
@@ -2136,19 +1905,16 @@ async function sendMessage(text) {
     throw new Error("Akses percakapan ditolak.");
   }
 
-  await addDoc(
-    collection(db, root, activeChat.id, "messages"),
-    {
-      sender: currentUser.uid,
-      senderName: currentProfile?.name || "Pengguna",
-      text: cleanText,
-      type: "text",
-      readBy: [currentUser.uid],
-      deletedFor: [],
-      deleted: false,
-      createdAt: serverTimestamp()
-    }
-  );
+  await addDoc(collection(db, root, activeChat.id, "messages"), {
+    sender: currentUser.uid,
+    senderName: currentProfile?.name || "Pengguna",
+    text: cleanText,
+    type: "text",
+    readBy: [currentUser.uid],
+    deletedFor: [],
+    deleted: false,
+    createdAt: serverTimestamp()
+  });
 
   await updateDoc(conversationRef, {
     lastMessage: cleanText,
@@ -2161,7 +1927,6 @@ async function sendMessage(text) {
 
 on("sendBtn", "click", async () => {
   const text = $("messageInput")?.value.trim();
-
   if (!text) return;
 
   $("sendBtn").disabled = true;
@@ -2206,13 +1971,7 @@ async function deleteChatForMe(chatId) {
 
   try {
     await setDoc(
-      doc(
-        db,
-        "users",
-        currentUser.uid,
-        "hiddenChats",
-        chatId
-      ),
+      doc(db, "users", currentUser.uid, "hiddenChats", chatId),
       {
         chatId,
         hiddenAt: serverTimestamp()
@@ -2221,6 +1980,8 @@ async function deleteChatForMe(chatId) {
 
     if (activeChat?.id === chatId) {
       stopMessageListener();
+      stopTypingListener();
+      stopPresenceListener();
 
       activeChat = null;
 
@@ -2257,30 +2018,18 @@ function listenChats() {
       for (const item of snap.docs) {
         const data = item.data();
 
-        const otherId = data.members?.find(
-          uid => uid !== currentUser.uid
-        );
-
+        const otherId = data.members?.find(uid => uid !== currentUser.uid);
         if (!otherId) continue;
 
         try {
           const [userSnap, hiddenSnap] = await Promise.all([
             getDoc(doc(db, "users", otherId)),
-            getDoc(
-              doc(
-                db,
-                "users",
-                currentUser.uid,
-                "hiddenChats",
-                item.id
-              )
-            )
+            getDoc(doc(db, "users", currentUser.uid, "hiddenChats", item.id))
           ]);
 
           if (!userSnap.exists()) continue;
 
           const user = userSnap.data();
-
           if (user.status !== "active") continue;
 
           const lastActivity = timestampMillis(
@@ -2291,9 +2040,7 @@ function listenChats() {
             ? timestampMillis(hiddenSnap.data().hiddenAt)
             : 0;
 
-          if (hiddenSnap.exists() && lastActivity <= hiddenAt) {
-            continue;
-          }
+          if (hiddenSnap.exists() && lastActivity <= hiddenAt) continue;
 
           if (hiddenSnap.exists() && lastActivity > hiddenAt) {
             deleteDoc(hiddenSnap.ref).catch(() => {});
@@ -2316,10 +2063,7 @@ function listenChats() {
       entries.forEach(entry => {
         const previous = unique.get(entry.otherId);
 
-        if (
-          !previous ||
-          entry.lastActivity > previous.lastActivity
-        ) {
+        if (!previous || entry.lastActivity > previous.lastActivity) {
           unique.set(entry.otherId, entry);
         }
       });
@@ -2332,31 +2076,18 @@ function listenChats() {
 
       if (!sorted.length) {
         list.append(
-          safeElement(
-            "div",
-            "chat-empty-note",
-            "Belum ada percakapan."
-          )
+          safeElement("div", "chat-empty-note", "Belum ada percakapan.")
         );
-
         return;
       }
 
       sorted.forEach(entry => {
         const row = safeElement("div", "chat-item");
-
         const avatar = safeElement("div", "avatar");
 
-        renderAvatarInto(
-          avatar,
-          entry.user.photoURL,
-          entry.user.name
-        );
+        renderAvatarInto(avatar, entry.user.photoURL, entry.user.name);
 
-        const details = safeElement(
-          "div",
-          "chat-item-details"
-        );
+        const details = safeElement("div", "chat-item-details");
 
         details.append(
           createNameElement(
@@ -2370,19 +2101,10 @@ function listenChats() {
           )
         );
 
-        const actions = safeElement(
-          "div",
-          "chat-row-actions"
-        );
-
-        const more = safeElement(
-          "button",
-          "chat-row-more",
-          "⋯"
-        );
+        const actions = safeElement("div", "chat-row-actions");
+        const more = safeElement("button", "chat-row-more", "⋯");
 
         more.type = "button";
-
         more.onclick = event => {
           event.stopPropagation();
           deleteChatForMe(entry.id);
@@ -2413,7 +2135,6 @@ function listenChats() {
 
 on("searchUser", "input", () => {
   clearTimeout(searchTimer);
-
   searchTimer = setTimeout(searchUsers, 350);
 });
 
@@ -2426,19 +2147,15 @@ async function searchUsers() {
   if (!results) return;
 
   results.replaceChildren();
-
   if (username.length < 3) return;
 
   try {
-    const usernameSnap = await getDoc(
-      doc(db, "usernames", username)
-    );
+    const usernameSnap = await getDoc(doc(db, "usernames", username));
 
     if (!usernameSnap.exists()) {
       results.append(
         safeElement("small", "search-empty", "Username tidak ditemukan.")
       );
-
       return;
     }
 
@@ -2448,25 +2165,19 @@ async function searchUsers() {
       results.append(
         safeElement("small", "search-empty", "Itu akun lu sendiri.")
       );
-
       return;
     }
 
     const userSnap = await getDoc(doc(db, "users", uid));
 
-    if (
-      !userSnap.exists() ||
-      userSnap.data().status !== "active"
-    ) {
+    if (!userSnap.exists() || userSnap.data().status !== "active") {
       results.append(
         safeElement("small", "search-empty", "Pengguna tidak tersedia.")
       );
-
       return;
     }
 
     const user = userSnap.data();
-
     const row = safeElement("div", "user-item");
     const avatar = safeElement("div", "avatar");
 
@@ -2480,10 +2191,7 @@ async function searchUsers() {
     );
 
     row.append(avatar, details);
-
-    row.onclick = () => {
-      openPrivateChat({ ...user, uid });
-    };
+    row.onclick = () => openPrivateChat({ ...user, uid });
 
     results.append(row);
   } catch (error) {
@@ -2508,7 +2216,6 @@ function createStatusModal() {
   modal.hidden = true;
 
   const card = safeElement("div", "zora-modal-card");
-
   const heading = safeElement("div", "zora-modal-heading");
   const title = safeElement("div");
 
@@ -2518,7 +2225,6 @@ function createStatusModal() {
   );
 
   const close = safeElement("button", "zora-modal-close", "×");
-
   close.type = "button";
   close.onclick = () => setHidden("statusModal", true);
 
@@ -2530,7 +2236,6 @@ function createStatusModal() {
   textarea.placeholder = "Apa yang sedang kamu pikirkan?";
 
   const actions = safeElement("div", "zora-modal-actions");
-
   const cancel = safeElement("button", "secondary-btn", "Batal");
   cancel.type = "button";
   cancel.onclick = () => setHidden("statusModal", true);
@@ -2545,9 +2250,7 @@ function createStatusModal() {
   modal.append(card);
 
   modal.onclick = event => {
-    if (event.target === modal) {
-      setHidden("statusModal", true);
-    }
+    if (event.target === modal) setHidden("statusModal", true);
   };
 
   document.body.append(modal);
@@ -2555,10 +2258,8 @@ function createStatusModal() {
 
 function openStatusModal() {
   createStatusModal();
-
   $("statusInput").value = "";
   setHidden("statusModal", false);
-
   setTimeout(() => $("statusInput")?.focus(), 100);
 }
 
@@ -2633,7 +2334,6 @@ function listenStatuses() {
 
         if (isMine) {
           const del = safeElement("button", "secondary-btn", "Hapus");
-
           del.type = "button";
 
           del.onclick = async event => {
@@ -2711,7 +2411,6 @@ on("closeProfile", "click", () => {
 on("saveProfile", "click", async () => {
   const name = $("profileName")?.value.trim();
   const bio = $("profileBio")?.value.trim() || "";
-
   const oldUsername = currentProfile?.username || "";
 
   const newUsername = normalizeUsername(
@@ -2730,11 +2429,7 @@ on("saveProfile", "click", async () => {
 
   try {
     if (newUsername !== normalizeUsername(oldUsername)) {
-      await claimUsername(
-        newUsername,
-        currentUser.uid,
-        oldUsername
-      );
+      await claimUsername(newUsername, currentUser.uid, oldUsername);
     }
 
     await updateDoc(doc(db, "users", currentUser.uid), {
@@ -2759,11 +2454,7 @@ on("appealBtn", "click", async () => {
   const text = $("appealText")?.value.trim();
 
   if (!text || text.length < 10) {
-    setText(
-      "appealMessage",
-      "Jelaskan alasan banding minimal 10 karakter."
-    );
-
+    setText("appealMessage", "Jelaskan alasan banding minimal 10 karakter.");
     return;
   }
 
@@ -2846,7 +2537,6 @@ on("findAdminUser", "click", async () => {
 
     actions.forEach(([label, changes]) => {
       const button = safeElement("button", "secondary-btn", label);
-
       button.type = "button";
 
       button.onclick = async () => {
@@ -2901,7 +2591,6 @@ async function loadAppeals() {
     );
 
     const snap = await getDocs(q);
-
     list.replaceChildren();
 
     if (snap.empty) {
@@ -3006,6 +2695,7 @@ document.addEventListener("click", event => {
 
 window.addEventListener("pagehide", () => {
   updateTyping(false);
+  setOffline();
 });
 
 // ======================================================
