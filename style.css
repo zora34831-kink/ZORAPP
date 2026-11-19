@@ -883,3 +883,361 @@ body.theme-neon .round-action{
   .brand{font-size:11px}
   .mobile-nav .nav-button{font-size:9px}
 }
+
+
+/* =========================================
+   ZORAAPP - STATUS MODAL
+========================================= */
+
+.zora-modal[hidden] {
+  display: none !important;
+}
+
+.zora-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, .65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.zora-modal-card {
+  width: 100%;
+  max-width: 440px;
+  padding: 23px;
+  border: 1px solid var(--border, #dedee8);
+  border-radius: 25px;
+  background: var(--surface, #fff);
+  color: var(--text, #182522);
+  box-shadow: 0 25px 80px rgba(0,0,0,.3);
+  animation: zoraModalIn .2s ease;
+}
+
+@keyframes zoraModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.zora-modal-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.zora-modal-heading small {
+  color: var(--accent, #3863d9);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.zora-modal-heading h2 {
+  margin: 5px 0 0;
+  font-size: 23px;
+}
+
+.zora-modal-close {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--surface2, #f2f3f8);
+  color: var(--text, #182522);
+  font-size: 25px;
+  cursor: pointer;
+}
+
+#statusInput {
+  display: block;
+  width: 100%;
+  min-height: 145px;
+  padding: 15px;
+  resize: vertical;
+  border: 1px solid var(--border, #dedee8);
+  border-radius: 15px;
+  outline: none;
+  background: var(--surface2, #f2f3f8);
+  color: var(--text, #182522);
+  font: inherit;
+  line-height: 1.6;
+  box-sizing: border-box;
+}
+
+#statusInput:focus {
+  border-color: var(--accent, #3863d9);
+}
+
+.zora-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.zora-modal-actions button {
+  min-height: 45px;
+  padding: 0 17px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.zora-modal-actions button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+/* =========================================
+   STATUS ITEM - FIX OVERLAPPING BUTTON
+========================================= */
+
+.status-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 13px 0;
+}
+
+.status-item .status-avatar {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 50%;
+}
+
+.status-item .status-details {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.status-item .status-details strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-item .status-details small {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.status-item .secondary-btn {
+  flex: 0 0 auto;
+  width: auto !important;
+  min-width: 65px;
+  max-width: 85px;
+  min-height: 38px;
+  margin: 0 !important;
+  padding: 0 12px !important;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+/* =========================================
+   PROFILE PHOTO
+========================================= */
+
+.profile-photo-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 16px 0 20px;
+  text-align: center;
+}
+
+.profile-photo-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 108px;
+  height: 108px;
+  overflow: hidden;
+  border: 3px solid var(--border, #ddd);
+  border-radius: 50%;
+  background: var(--surface2, #f2f3f8);
+  color: var(--accent, #3863d9);
+  font-size: 38px;
+  font-weight: 800;
+}
+
+.avatar-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.photo-upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 12px;
+  background: var(--accent, #3863d9);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profile-photo-editor small {
+  color: var(--muted, #78808c);
+  font-size: 11px;
+}
+
+/* =========================================
+   CHAT LIST + UNREAD BADGE
+========================================= */
+
+.chat-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+
+.chat-item-details {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.chat-item-details strong,
+.chat-item-details small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unread-badge {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 20px;
+  background: #25d366;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* =========================================
+   WHATSAPP DOUBLE TICKS
+========================================= */
+
+.message-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-height: 15px;
+  margin-top: 5px;
+}
+
+.message-footer small {
+  color: var(--muted, #84909b);
+  font-size: 10px;
+}
+
+.message-ticks {
+  padding-right: 4px;
+  color: #87929c;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -4px;
+  line-height: 1;
+}
+
+.message-ticks.read {
+  color: #34b7f1;
+}
+
+/* =========================================
+   AVATAR IMAGE
+========================================= */
+
+.avatar,
+.status-avatar,
+#myAvatar,
+#chatAvatar {
+  overflow: hidden;
+}
+
+.avatar .avatar-photo,
+.status-avatar .avatar-photo,
+#myAvatar .avatar-photo,
+#chatAvatar .avatar-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media (max-width: 420px) {
+  .zora-modal {
+    padding: 13px;
+  }
+
+  .zora-modal-card {
+    padding: 19px;
+    border-radius: 22px;
+  }
+
+  .status-item {
+    gap: 9px !important;
+  }
+
+  .status-item .status-avatar {
+    flex-basis: 42px;
+    width: 42px;
+    height: 42px;
+  }
+
+  .status-item .secondary-btn {
+    min-width: 55px;
+    max-width: 70px;
+    padding: 0 8px !important;
+    font-size: 11px;
+  }
+
+  .profile-photo-preview {
+    width: 96px;
+    height: 96px;
+  }
+}
