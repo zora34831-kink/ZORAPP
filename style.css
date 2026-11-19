@@ -1560,3 +1560,256 @@ body.theme-neon .round-action{
     flex-basis: 27px;
   }
 }
+
+
+/* =========================================
+   ZORAAPP FINAL UI PATCH
+========================================= */
+
+/* Verified badge */
+.verified-badge {
+  display: inline-block;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  margin-left: 5px;
+  vertical-align: -3px;
+  filter: drop-shadow(0 2px 4px rgba(37,137,245,.2));
+}
+
+.chat-item-details strong,
+.user-item strong,
+.conversation-user strong,
+.profile-info strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Mobile navigation */
+@media (max-width: 800px) {
+  .app {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .main-layout {
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .conversation-area {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    overflow: hidden;
+  }
+
+  .app.chat-open .conversation-area {
+    display: block;
+    bottom: 66px;
+  }
+
+  .mobile-nav {
+    position: fixed !important;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000 !important;
+    display: flex !important;
+    height: calc(66px + env(safe-area-inset-bottom));
+    min-height: 66px;
+    padding: 7px 9px calc(7px + env(safe-area-inset-bottom));
+    gap: 5px;
+    border: 1px solid color-mix(in srgb,var(--accent) 20%,var(--border));
+    border-radius: 20px 20px 0 0;
+    background: color-mix(in srgb,var(--surface) 76%,transparent);
+    -webkit-backdrop-filter: blur(25px) saturate(170%);
+    backdrop-filter: blur(25px) saturate(170%);
+    box-shadow: 0 -8px 35px rgba(0,0,0,.2);
+  }
+
+  .app.chat-open .mobile-nav {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  .app.chat-open .chat-panel {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .app.chat-open .messages {
+    min-height: 0;
+    padding-bottom: 15px;
+  }
+
+  .app.chat-open .composer {
+    flex: 0 0 auto;
+    padding-bottom: 10px;
+  }
+
+  .app.chat-open .conversation-area {
+    isolation: isolate;
+  }
+
+  .message-menu {
+    position: fixed;
+    right: 14px;
+    bottom: calc(80px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Premium dialog */
+.zora-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(5,8,16,.68);
+  -webkit-backdrop-filter: blur(15px);
+  backdrop-filter: blur(15px);
+  animation: zoraDialogFade .2s ease;
+}
+
+.zora-dialog-card {
+  width: min(100%,390px);
+  padding: 25px;
+  border: 1px solid color-mix(in srgb,var(--accent) 20%,var(--border));
+  border-radius: 24px;
+  background: color-mix(in srgb,var(--surface) 94%,transparent);
+  color: var(--text);
+  box-shadow: 0 25px 90px rgba(0,0,0,.35),var(--glow);
+  animation: zoraDialogEnter .25s cubic-bezier(.2,.8,.2,1);
+}
+
+.zora-dialog-kicker {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  margin-bottom: 10px;
+}
+
+.zora-dialog-card h2 {
+  margin: 0 0 9px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.zora-dialog-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.zora-dialog-input {
+  display: block;
+  width: 100%;
+  min-height: 45px;
+  margin-top: 17px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface2);
+  color: var(--text);
+  outline: none;
+  resize: vertical;
+}
+
+.zora-dialog-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb,var(--accent) 13%,transparent);
+}
+
+.zora-dialog-input.invalid {
+  border-color: var(--danger);
+}
+
+.zora-dialog-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 22px;
+}
+
+.zora-dialog-actions button {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 800;
+  transition: .2s;
+}
+
+.zora-dialog-actions button:active {
+  transform: scale(.97);
+}
+
+.zora-dialog-cancel {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.zora-dialog-confirm {
+  background: var(--accent);
+  color: #10131d;
+}
+
+.zora-dialog-confirm.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+@keyframes zoraDialogFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes zoraDialogEnter {
+  from {
+    opacity: 0;
+    transform: translateY(15px) scale(.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Toast premium */
+.toast {
+  z-index: 100001;
+  bottom: calc(82px + env(safe-area-inset-bottom));
+  padding: 13px 18px;
+  border: 1px solid color-mix(in srgb,var(--accent) 24%,var(--border));
+  border-radius: 16px;
+  background: color-mix(in srgb,var(--surface) 83%,transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: blur(22px) saturate(160%);
+  box-shadow: 0 12px 40px rgba(0,0,0,.25),var(--glow);
+}
+
+.message-menu {
+  border: 1px solid color-mix(in srgb,var(--accent) 20%,var(--border));
+  border-radius: 16px;
+  background: color-mix(in srgb,var(--surface) 94%,transparent);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow);
+}
+
+@media(max-width:420px) {
+  .zora-dialog-card {
+    padding: 22px;
+    border-radius: 22px;
+  }
+}
