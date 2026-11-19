@@ -13,7 +13,7 @@ import {
   doc, getDoc, setDoc, updateDoc, deleteDoc,
   collection, addDoc, getDocs, query, where,
   orderBy, onSnapshot, serverTimestamp, limit,
-  runTransaction, arrayUnion, arrayRemove
+  runTransaction, arrayUnion, arrayRemove, deleteField
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
 
 import {
@@ -34,6 +34,8 @@ const $ = id => document.getElementById(id);
 const exists = id => Boolean($(id));
 const THEMES = ["neon", "dark", "light", "purple"];
 
+const CHANNEL_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
+
 let currentUser = null;
 let currentProfile = null;
 let activeChat = null;
@@ -43,6 +45,7 @@ let unsubscribers = [];
 let messageUnsubscribe = null;
 let typingUnsubscribe = null;
 let presenceUnsubscribe = null;
+let channelUnsubscribe = null;
 
 let appListenersStarted = false;
 let toastTimer = null;
@@ -79,6 +82,16 @@ function safeElement(tag, className = "", text) {
 
 function isAdmin() {
   return currentUser?.uid === ADMIN_UID;
+}
+
+function canManageChannel() {
+  return Boolean(
+    activeChatType === "channel" &&
+    (
+      isAdmin() ||
+      activeChat?.owner === currentUser?.uid
+    )
+  );
 }
 
 function errorMessage(error) {
@@ -486,6 +499,13 @@ function stopPresenceListener() {
   }
 }
 
+function stopChannelListener() {
+  if (channelUnsubscribe) {
+    channelUnsubscribe();
+    channelUnsubscribe = null;
+  }
+}
+
 function cleanup() {
   unsubscribers.forEach(unsubscribe => {
     try {
@@ -498,6 +518,7 @@ function cleanup() {
   stopMessageListener();
   stopTypingListener();
   stopPresenceListener();
+  stopChannelListener();
 
   clearTimeout(typingTimer);
 
@@ -1055,8 +1076,33 @@ on("backToChats", "click", () => {
 });
 
 // ======================================================
-// CONVERSATION
+// CONVERSATION HEADER
 // ======================================================
+
+function ensureChatTitleWrapper() {
+  const nameElement = $("chatName");
+
+  if (!nameElement) return null;
+
+  let wrapper = $("chatTitleWrap");
+
+  if (wrapper) return wrapper;
+
+  wrapper = safeElement("div", "chat-title-wrap");
+  wrapper.id = "chatTitleWrap";
+
+  nameElement.parentNode.insertBefore(wrapper, nameElement);
+  wrapper.append(nameElement);
+
+  wrapper.style.display = "flex";
+  wrapper.style.flexDirection = "column";
+  wrapper.style.alignItems = "flex-start";
+  wrapper.style.justifyContent = "center";
+  wrapper.style.minWidth = "0";
+  wrapper.style.gap = "2px";
+
+  return wrapper;
+}
 
 function createChatSecurityNotice() {
   const panel = $("chatPanel");
@@ -1096,11 +1142,15 @@ function showConversation(name, verified = false) {
   $("inviteGroupMember")?.remove();
   $("chatPresence")?.remove();
   $("typingIndicator")?.remove();
+  $("channelHeaderMeta")?.remove();
 
   setHidden("emptyChat", true);
   setHidden("chatPanel", false);
 
   renderVerifiedName("chatName", name, verified);
+
+  ensureChatTitleWrapper();
+
   renderAvatar("chatAvatar", activeChat?.photoURL, name);
 
   createChatSecurityNotice();
@@ -1128,7 +1178,16 @@ function updateComposerAccess() {
   composer.hidden = !canPost;
   send.hidden = !canPost;
 
-  if (image) image.disabled = !canPost;
+  if (image) {
+    image.disabled = !canPost;
+    image.hidden = !canPost;
+  }
+
+  const imageLabel = image?.closest("label");
+
+  if (imageLabel) {
+    imageLabel.hidden = !canPost;
+  }
 
   if (isChannel && !canPost) {
     composer.value = "";
@@ -1181,6 +1240,7 @@ async function openPrivateChat(other) {
     stopMessageListener();
     stopPresenceListener();
     stopTypingListener();
+    stopChannelListener();
 
     const existing = await findExistingPrivateChat(other.uid);
 
@@ -1260,8 +1320,10 @@ function listenOtherPresence(uid) {
   const element = safeElement("small", "chat-presence");
   element.id = "chatPresence";
 
-  // Status tepat di bawah nama kontak.
-  nameElement.after(element);
+  const wrapper = ensureChatTitleWrapper();
+
+  if (wrapper) wrapper.append(element);
+  else nameElement.after(element);
 
   presenceUnsubscribe = listenPresence(uid, data => {
     if (!data) {
@@ -1420,6 +1482,7 @@ function openGroup(id, name) {
   stopMessageListener();
   stopPresenceListener();
   stopTypingListener();
+  stopChannelListener();
 
   activeChat = {
     id,
@@ -1531,7 +1594,6 @@ function listenChannels() {
           "chat-item-details channel-item-details"
         );
 
-        // Urutan: nama -> jumlah pengikut -> deskripsi.
         details.append(
           safeElement(
             "strong",
@@ -1552,7 +1614,6 @@ function listenChannels() {
 
         row.append(avatar, details);
 
-        // Tombol hanya muncul jika belum mengikuti.
         if (!owner && !following) {
           const follow = safeElement(
             "button",
@@ -1627,10 +1688,41 @@ async function toggleFollowChannel(channelId) {
   }
 }
 
+// Header saluran: nama dan jumlah pengikut berada dalam satu kolom.
+function renderChannelHeaderMeta() {
+  const channel = activeChat;
+
+  if (!channel || activeChatType !== "channel") return;
+
+  const wrapper = ensureChatTitleWrapper();
+
+  if (!wrapper) return;
+
+  let meta = $("channelHeaderMeta");
+
+  if (!meta) {
+    meta = safeElement("div", "channel-header-meta");
+    meta.id = "channelHeaderMeta";
+
+    meta.style.display = "block";
+    meta.style.width = "100%";
+    meta.style.fontSize = "12px";
+    meta.style.lineHeight = "1.4";
+    meta.style.opacity = "0.75";
+    meta.style.marginTop = "2px";
+
+    wrapper.append(meta);
+  }
+
+  meta.textContent = `${(channel.followers || []).length} pengikut`;
+}
+
 function renderChannelControls() {
   const channel = activeChat;
 
   if (!channel || activeChatType !== "channel") return;
+
+  renderChannelHeaderMeta();
 
   let controls = $("channelControls");
 
@@ -1650,15 +1742,7 @@ function renderChannelControls() {
   const owner = channel.owner === currentUser.uid;
   const following = followers.includes(currentUser.uid);
 
-  controls.append(
-    safeElement(
-      "span",
-      "channel-follower-count",
-      `${followers.length} pengikut`
-    )
-  );
-
-  // Jika sudah mengikuti, tombol tidak ditampilkan.
+  // Tidak menampilkan jumlah pengikut kedua kali di area tombol.
   if (!owner && !following) {
     const button = safeElement(
       "button",
@@ -1675,10 +1759,187 @@ function renderChannelControls() {
   updateComposerAccess();
 }
 
+// Reaksi postingan saluran.
+function renderChannelReactions(postId, reactions = {}) {
+  const wrapper = safeElement("div", "channel-reactions");
+
+  wrapper.style.display = "flex";
+  wrapper.style.flexWrap = "wrap";
+  wrapper.style.gap = "6px";
+  wrapper.style.marginTop = "10px";
+
+  const counts = {};
+
+  Object.values(reactions || {}).forEach(emoji => {
+    if (!CHANNEL_REACTIONS.includes(emoji)) return;
+    counts[emoji] = (counts[emoji] || 0) + 1;
+  });
+
+  CHANNEL_REACTIONS.forEach(emoji => {
+    const count = counts[emoji] || 0;
+    const selected = reactions?.[currentUser.uid] === emoji;
+
+    const button = safeElement(
+      "button",
+      `channel-reaction${selected ? " selected" : ""}`,
+      count ? `${emoji} ${count}` : emoji
+    );
+
+    button.type = "button";
+    button.title = `Reaksi ${emoji}`;
+
+    button.style.border = selected
+      ? "1px solid var(--accent, #438cff)"
+      : "1px solid var(--border, rgba(128,128,128,.25))";
+
+    button.style.borderRadius = "20px";
+    button.style.padding = "5px 10px";
+    button.style.background = selected
+      ? "rgba(67,140,255,.14)"
+      : "transparent";
+    button.style.cursor = "pointer";
+    button.style.fontSize = "13px";
+
+    button.onclick = () => toggleChannelReaction(postId, emoji);
+
+    wrapper.append(button);
+  });
+
+  return wrapper;
+}
+
+async function toggleChannelReaction(postId, emoji) {
+  if (!currentUser || !activeChat || activeChatType !== "channel") {
+    return;
+  }
+
+  if (!CHANNEL_REACTIONS.includes(emoji)) return;
+
+  try {
+    const postRef = doc(
+      db,
+      "channels",
+      activeChat.id,
+      "posts",
+      postId
+    );
+
+    const postSnap = await getDoc(postRef);
+
+    if (!postSnap.exists()) {
+      throw new Error("Postingan sudah tidak tersedia.");
+    }
+
+    const reactions = postSnap.data().reactions || {};
+    const currentReaction = reactions[currentUser.uid];
+
+    if (currentReaction === emoji) {
+      await updateDoc(postRef, {
+        [`reactions.${currentUser.uid}`]: deleteField()
+      });
+    } else {
+      await updateDoc(postRef, {
+        [`reactions.${currentUser.uid}`]: emoji
+      });
+    }
+  } catch (error) {
+    toast(errorMessage(error));
+  }
+}
+
+function createChannelPost(post, postId, channelId) {
+  const bubble = safeElement("div", "bubble channel-post");
+
+  bubble.append(
+    safeElement(
+      "div",
+      "message-body",
+      post.text || ""
+    )
+  );
+
+  if (post.imageURL) {
+    const image = document.createElement("img");
+
+    image.src = post.imageURL;
+    image.alt = "Foto postingan saluran";
+    image.className = "channel-post-image";
+    image.loading = "lazy";
+
+    image.style.display = "block";
+    image.style.maxWidth = "100%";
+    image.style.maxHeight = "420px";
+    image.style.objectFit = "contain";
+    image.style.borderRadius = "12px";
+    image.style.marginTop = "8px";
+
+    image.onerror = () => {
+      image.alt = "Foto tidak dapat dimuat";
+    };
+
+    bubble.append(image);
+  }
+
+  bubble.append(
+    safeElement(
+      "small",
+      "",
+      `${post.authorName || "Admin"} · ${formatTime(post.createdAt)}`
+    )
+  );
+
+  bubble.append(
+    renderChannelReactions(postId, post.reactions || {})
+  );
+
+  const canDelete =
+    post.uid === currentUser.uid ||
+    isAdmin() ||
+    activeChat?.owner === currentUser.uid;
+
+  if (canDelete) {
+    const del = safeElement(
+      "button",
+      "message-delete",
+      "Hapus"
+    );
+
+    del.type = "button";
+
+    del.onclick = async () => {
+      const confirmed = await zoraConfirm(
+        "Hapus postingan ini?",
+        {
+          title: "Hapus postingan",
+          confirmText: "Hapus",
+          danger: true
+        }
+      );
+
+      if (!confirmed) return;
+
+      try {
+        await deleteDoc(
+          doc(db, "channels", channelId, "posts", postId)
+        );
+
+        toast("Postingan dihapus.");
+      } catch (error) {
+        toast(errorMessage(error));
+      }
+    };
+
+    bubble.append(del);
+  }
+
+  return bubble;
+}
+
 async function openChannel(id, name, owner) {
   stopMessageListener();
   stopPresenceListener();
   stopTypingListener();
+  stopChannelListener();
 
   try {
     const snap = await getDoc(doc(db, "channels", id));
@@ -1702,14 +1963,35 @@ async function openChannel(id, name, owner) {
     showConversation(activeChat.name, false);
     renderChannelControls();
 
-    const q = query(
+    // Pantau dokumen saluran agar jumlah pengikut selalu realtime.
+    channelUnsubscribe = onSnapshot(
+      doc(db, "channels", id),
+      channelSnap => {
+        if (
+          !channelSnap.exists() ||
+          activeChat?.id !== id ||
+          activeChatType !== "channel"
+        ) return;
+
+        const latest = channelSnap.data();
+
+        activeChat.name = latest.name || activeChat.name;
+        activeChat.owner = latest.owner || activeChat.owner;
+        activeChat.followers = latest.followers || [];
+
+        renderChannelControls();
+      },
+      error => toast(errorMessage(error))
+    );
+
+    const postsQuery = query(
       collection(db, "channels", id, "posts"),
       orderBy("createdAt", "asc"),
       limit(100)
     );
 
     messageUnsubscribe = onSnapshot(
-      q,
+      postsQuery,
       snapshot => {
         if (
           activeChat?.id !== id ||
@@ -1725,60 +2007,9 @@ async function openChannel(id, name, owner) {
         snapshot.forEach(item => {
           const post = item.data();
 
-          const bubble = safeElement("div", "bubble");
-
-          bubble.append(
-            safeElement(
-              "div",
-              "message-body",
-              post.text || ""
-            ),
-            safeElement(
-              "small",
-              "",
-              `${post.authorName || "Admin"} · ${formatTime(post.createdAt)}`
-            )
+          container.append(
+            createChannelPost(post, item.id, id)
           );
-
-          if (
-            post.uid === currentUser.uid ||
-            isAdmin()
-          ) {
-            const del = safeElement(
-              "button",
-              "message-delete",
-              "Hapus"
-            );
-
-            del.type = "button";
-
-            del.onclick = async () => {
-              const confirmed = await zoraConfirm(
-                "Hapus postingan ini?",
-                {
-                  title: "Hapus postingan",
-                  confirmText: "Hapus",
-                  danger: true
-                }
-              );
-
-              if (!confirmed) return;
-
-              try {
-                await deleteDoc(
-                  doc(db, "channels", id, "posts", item.id)
-                );
-
-                toast("Postingan dihapus.");
-              } catch (error) {
-                toast(errorMessage(error));
-              }
-            };
-
-            bubble.append(del);
-          }
-
-          container.append(bubble);
         });
 
         container.scrollTop = container.scrollHeight;
@@ -1788,6 +2019,56 @@ async function openChannel(id, name, owner) {
   } catch (error) {
     toast(errorMessage(error));
   }
+}
+
+// ======================================================
+// CHANNEL IMAGE UPLOAD
+// ======================================================
+
+async function uploadChannelImage(file) {
+  if (!currentUser || !activeChat || activeChatType !== "channel") {
+    throw new Error("Pilih saluran terlebih dahulu.");
+  }
+
+  if (!canManageChannel()) {
+    throw new Error("Hanya admin saluran yang boleh mengirim foto.");
+  }
+
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    throw new Error("Format foto harus JPG, PNG, atau WEBP.");
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error("Ukuran foto maksimal 5 MB.");
+  }
+
+  const channelId = activeChat.id;
+  const safeName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+
+  const imageRef = ref(
+    storage,
+    `channelPosts/${channelId}/${safeName}`
+  );
+
+  await uploadBytes(imageRef, file, {
+    contentType: file.type
+  });
+
+  const imageURL = await getDownloadURL(imageRef);
+
+  await addDoc(
+    collection(db, "channels", channelId, "posts"),
+    {
+      uid: currentUser.uid,
+      authorName: currentProfile?.name || "Admin",
+      text: "",
+      imageURL,
+      reactions: {},
+      createdAt: serverTimestamp()
+    }
+  );
+
+  toast("Foto berhasil diposting ke saluran.");
 }
 
 // ======================================================
@@ -2081,11 +2362,7 @@ async function sendMessage(text) {
 
   // CHANNEL
   if (activeChatType === "channel") {
-    const allowed =
-      isAdmin() ||
-      activeChat.owner === currentUser.uid;
-
-    if (!allowed) {
+    if (!canManageChannel()) {
       throw new Error("Hanya admin saluran yang boleh posting.");
     }
 
@@ -2095,6 +2372,8 @@ async function sendMessage(text) {
         uid: currentUser.uid,
         authorName: currentProfile?.name || "Admin",
         text: cleanText,
+        imageURL: "",
+        reactions: {},
         createdAt: serverTimestamp()
       }
     );
@@ -2121,7 +2400,6 @@ async function sendMessage(text) {
     throw new Error("Akses percakapan ditolak.");
   }
 
-  // Kirim pesan terlebih dahulu.
   await addDoc(
     collection(db, root, activeChat.id, "messages"),
     {
@@ -2136,7 +2414,6 @@ async function sendMessage(text) {
     }
   );
 
-  // Update metadata secara terpisah.
   try {
     await updateDoc(conversationRef, {
       lastMessage: cleanText,
@@ -2181,9 +2458,33 @@ on("messageInput", "keydown", event => {
   }
 });
 
-on("imageInput", "change", event => {
-  event.target.value = "";
-  toast("Pengiriman gambar chat belum diaktifkan.");
+// Upload gambar: khusus postingan saluran untuk admin/pemilik.
+on("imageInput", "change", async event => {
+  const input = event.target;
+  const file = input.files?.[0];
+
+  if (!file) return;
+
+  try {
+    if (activeChatType !== "channel") {
+      toast("Upload foto chat belum diaktifkan.");
+      return;
+    }
+
+    if (!canManageChannel()) {
+      toast("Hanya admin saluran yang boleh mengirim foto.");
+      return;
+    }
+
+    input.disabled = true;
+
+    await uploadChannelImage(file);
+  } catch (error) {
+    toast(errorMessage(error));
+  } finally {
+    input.disabled = false;
+    input.value = "";
+  }
 });
 
 // ======================================================
