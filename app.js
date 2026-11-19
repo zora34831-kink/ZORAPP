@@ -19,7 +19,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-storage.js";
 
 // GANTI DENGAN UID AKUN ADMIN LU
-const ADMIN_UID = "GANTI_DENGAN_UID_ADMIN";
+const ADMIN_UID = "PbeBf6CtGLVWvX2RqnuvXBWyePG2";
 
 const $ = id => document.getElementById(id);
 let currentUser=null;
