@@ -2,8 +2,8 @@
 import { auth, db, storage } from "./firebase.js";
 
 import {
-  createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   onAuthStateChanged,
   signOut
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
@@ -19,9 +19,9 @@ import {
   ref, uploadBytes, getDownloadURL
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-storage.js";
 
-// ======================================
-// KONFIGURASI
-// ======================================
+// ==========================================
+// CONFIG
+// ==========================================
 
 const ADMIN_UID = "PbeBf6CtGLVWvX2RqnuvXBWyePG2";
 
@@ -32,94 +32,113 @@ let currentProfile = null;
 let activeChat = null;
 
 let profileUnsubscribe = null;
-let activeUnsubscribe = null;
 let chatUnsubscribe = null;
+let messageUnsubscribe = null;
 let statusUnsubscribe = null;
 
-let registrationInProgress = false;
 let searchTimer = null;
+let authReady = false;
 
-const show = id => {
+// ==========================================
+// UTILITIES
+// ==========================================
+
+function showScreen(id) {
   ["authScreen", "holdScreen", "permanentScreen", "appScreen"]
-    .forEach(x => {
-      $(x).hidden = x !== id;
+    .forEach(screen => {
+      $(screen).hidden = screen !== id;
     });
-};
-
-const isAdmin = () => currentUser?.uid === ADMIN_UID;
-
-function showError(message) {
-  $("authError").textContent = message || "";
 }
 
-function reportError(error) {
+function setError(id, message) {
+  if ($(id)) $(id).textContent = message || "";
+}
+
+function errorMessage(error) {
   console.error(error);
-  return error?.message || "Terjadi kesalahan. Silakan coba lagi.";
+  return error?.message || "Terjadi kesalahan.";
+}
+
+function isAdmin() {
+  return currentUser?.uid === ADMIN_UID;
 }
 
 function cleanupListeners() {
   [
     profileUnsubscribe,
-    activeUnsubscribe,
     chatUnsubscribe,
+    messageUnsubscribe,
     statusUnsubscribe
   ].forEach(unsubscribe => {
     if (unsubscribe) unsubscribe();
   });
 
   profileUnsubscribe = null;
-  activeUnsubscribe = null;
   chatUnsubscribe = null;
+  messageUnsubscribe = null;
   statusUnsubscribe = null;
 }
 
-// ======================================
+function safeElement(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+
+// ==========================================
 // LOGIN
-// ======================================
+// ==========================================
 
 $("loginBtn").onclick = async () => {
   const email = $("authEmail").value.trim();
   const password = $("authPassword").value;
 
+  setError("authError", "");
+
   if (!email || !password) {
-    showError("Email dan password harus diisi.");
+    setError("authError", "Email dan password wajib diisi.");
     return;
   }
 
   $("loginBtn").disabled = true;
-  showError("");
 
   try {
     await signInWithEmailAndPassword(auth, email, password);
-  } catch (e) {
-    showError(reportError(e));
+  } catch (error) {
+    setError("authError", errorMessage(error));
   } finally {
     $("loginBtn").disabled = false;
   }
 };
 
-// ======================================
+// ==========================================
 // REGISTER
-// ======================================
+// ==========================================
 
 $("registerBtn").onclick = async () => {
   const name = $("authName").value.trim();
-  const email = $("authEmail").value.trim();
-  const password = $("authPassword").value;
+  const email = $("registerEmail").value.trim();
+  const password = $("registerPassword").value;
+
+  setError("registerError", "");
 
   if (!name || !email || !password) {
-    showError("Semua kolom harus diisi.");
+    setError("registerError", "Semua kolom wajib diisi.");
+    return;
+  }
+
+  if (name.length < 3) {
+    setError("registerError", "Nama minimal 3 karakter.");
     return;
   }
 
   if (password.length < 8) {
-    showError("Password minimal 8 karakter.");
+    setError("registerError", "Password minimal 8 karakter.");
     return;
   }
 
   $("registerBtn").disabled = true;
-  showError("");
-  registrationInProgress = true;
 
   try {
     const credential = await createUserWithEmailAndPassword(
@@ -139,18 +158,19 @@ $("registerBtn").onclick = async () => {
     });
 
     $("authName").value = "";
-    $("authPassword").value = "";
-  } catch (e) {
-    showError(reportError(e));
+    $("registerEmail").value = "";
+    $("registerPassword").value = "";
+
+  } catch (error) {
+    setError("registerError", errorMessage(error));
   } finally {
-    registrationInProgress = false;
     $("registerBtn").disabled = false;
   }
 };
 
-// ======================================
-// AUTH STATE DAN PROFIL REALTIME
-// ======================================
+// ==========================================
+// AUTH STATE
+// ==========================================
 
 onAuthStateChanged(auth, user => {
   cleanupListeners();
@@ -160,70 +180,68 @@ onAuthStateChanged(auth, user => {
   activeChat = null;
 
   if (!user) {
-    show("authScreen");
+    showScreen("authScreen");
     return;
   }
 
-  const profileRef = doc(db, "users", user.uid);
+  const userRef = doc(db, "users", user.uid);
 
-  profileUnsubscribe = onSnapshot(
-    profileRef,
-    snap => {
-      if (!snap.exists()) {
-        if (!registrationInProgress) {
-          show("authScreen");
-          showError("Profil pengguna tidak ditemukan.");
-        }
-        return;
-      }
-
-      currentProfile = snap.data();
-
-      if (currentProfile.status === "permanent") {
-        show("permanentScreen");
-        return;
-      }
-
-      if (currentProfile.status === "held") {
-        show("holdScreen");
-        return;
-      }
-
-      if (currentProfile.status !== "active") {
-        show("holdScreen");
-        return;
-      }
-
-      show("appScreen");
-
-      $("myName").textContent = currentProfile.name || "Pengguna";
-      $("myEmail").textContent = user.email || "";
-      $("myAvatar").textContent =
-        (currentProfile.name || "Z")[0].toUpperCase();
-
-      $("adminLink").hidden = !isAdmin();
-
-      listenChats();
-      listenStatuses();
-    },
-    e => {
-      showError(reportError(e));
-      show("authScreen");
+  profileUnsubscribe = onSnapshot(userRef, snap => {
+    if (!snap.exists()) {
+      showScreen("authScreen");
+      setError("authError", "Profil akun tidak ditemukan.");
+      return;
     }
-  );
+
+    currentProfile = snap.data();
+
+    if (currentProfile.status === "permanent") {
+      showScreen("permanentScreen");
+      return;
+    }
+
+    if (currentProfile.status === "held") {
+      showScreen("holdScreen");
+      return;
+    }
+
+    if (currentProfile.status !== "active") {
+      showScreen("holdScreen");
+      return;
+    }
+
+    showScreen("appScreen");
+
+    $("myName").textContent = currentProfile.name || "Pengguna";
+    $("myEmail").textContent = user.email || "";
+
+    $("myAvatar").textContent =
+      (currentProfile.name || "Z")[0].toUpperCase();
+
+    $("adminLink").hidden = !isAdmin();
+
+    listenChats();
+    listenStatuses();
+
+  }, error => {
+    console.error("Profile listener:", error);
+    showScreen("authScreen");
+    setError("authError", errorMessage(error));
+  });
 });
 
-// ======================================
+// ==========================================
 // LOGOUT
-// ======================================
+// ==========================================
 
 async function logout() {
   try {
     await signOut(auth);
     $("authPassword").value = "";
-    showError("");
-  } catch (e) {
-    alert(reportError(e));
+    $("registerPassword").value = "";
+    setError("authError", "");
+  } catch (error) {
+    alert(errorMessage(error));
   }
 }
 
@@ -231,9 +249,9 @@ $("logoutBtn").onclick = logout;
 $("logoutHold").onclick = logout;
 $("newAccountBtn").onclick = logout;
 
-// ======================================
-// TEMA
-// ======================================
+// ==========================================
+// THEME
+// ==========================================
 
 $("themeBtn").onclick = () => {
   document.body.classList.toggle("dark");
@@ -248,18 +266,17 @@ if (localStorage.getItem("zora-theme") === "dark") {
   document.body.classList.add("dark");
 }
 
-// ======================================
-// PENCARIAN PENGGUNA
-// ======================================
+// ==========================================
+// SEARCH USERS
+// ==========================================
 
 $("searchUser").oninput = () => {
   clearTimeout(searchTimer);
-
   searchTimer = setTimeout(searchUsers, 400);
 };
 
 async function searchUsers() {
-  if (!currentUser || !currentProfile) return;
+  if (!currentUser) return;
 
   const value = $("searchUser").value.trim().toLowerCase();
   const results = $("searchResults");
@@ -271,35 +288,37 @@ async function searchUsers() {
   try {
     const snap = await getDocs(collection(db, "users"));
 
-    snap.forEach(d => {
-      const u = d.data();
+    snap.forEach(document => {
+      const user = document.data();
 
       if (
-        u.uid !== currentUser.uid &&
-        u.status === "active" &&
-        u.name?.toLowerCase().includes(value)
+        user.uid !== currentUser.uid &&
+        user.status === "active" &&
+        user.name?.toLowerCase().includes(value)
       ) {
-        const item = document.createElement("div");
-        item.className = "user-item";
+        const item = safeElement("div", "user-item");
 
-        const name = document.createElement("strong");
-        name.textContent = (u.name || "Pengguna") +
-          (u.verified ? " ✓" : "");
+        const name = safeElement(
+          "strong",
+          "",
+          user.name + (user.verified ? " ✓" : "")
+        );
 
         item.append(name);
-        item.onclick = () => openChat(u);
+        item.onclick = () => openChat(user);
 
         results.append(item);
       }
     });
-  } catch (e) {
-    console.error("Pencarian:", e);
+
+  } catch (error) {
+    console.error("Search:", error);
   }
 }
 
-// ======================================
-// CHAT PRIBADI
-// ======================================
+// ==========================================
+// CHAT
+// ==========================================
 
 function chatId(a, b) {
   return [a, b].sort().join("_");
@@ -307,26 +326,27 @@ function chatId(a, b) {
 
 async function openChat(other) {
   if (!currentUser || !other?.uid) return;
-  if (other.status !== "active") return;
+
+  if (other.status !== "active") {
+    alert("Pengguna ini tidak tersedia.");
+    return;
+  }
 
   try {
     activeChat = other;
 
     const id = chatId(currentUser.uid, other.uid);
 
-    await setDoc(
-      doc(db, "chats", id),
-      {
-        members: [currentUser.uid, other.uid],
-        updatedAt: serverTimestamp()
-      },
-      { merge: true }
-    );
+    await setDoc(doc(db, "chats", id), {
+      members: [currentUser.uid, other.uid],
+      updatedAt: serverTimestamp()
+    }, { merge: true });
 
     $("emptyChat").hidden = true;
     $("chatPanel").hidden = false;
 
     $("chatName").textContent = other.name || "Pengguna";
+
     $("chatAvatar").textContent =
       (other.name || "U")[0].toUpperCase();
 
@@ -336,9 +356,14 @@ async function openChat(other) {
     $("chatVerified").className =
       other.verified ? "verified" : "";
 
-    if (activeUnsubscribe) activeUnsubscribe();
+    if (messageUnsubscribe) messageUnsubscribe();
 
-    const messagesRef = collection(db, "chats", id, "messages");
+    const messagesRef = collection(
+      db,
+      "chats",
+      id,
+      "messages"
+    );
 
     const q = query(
       messagesRef,
@@ -346,61 +371,65 @@ async function openChat(other) {
       limit(200)
     );
 
-    activeUnsubscribe = onSnapshot(q, snap => {
-      const messages = $("messages");
-      messages.replaceChildren();
+    messageUnsubscribe = onSnapshot(q, snap => {
+      const container = $("messages");
+      container.replaceChildren();
 
-      snap.forEach(d => {
-        const m = d.data();
+      snap.forEach(document => {
+        const message = document.data();
 
-        const bubble = document.createElement("div");
-
-        bubble.className =
+        const bubble = safeElement(
+          "div",
           "bubble" +
-          (m.sender === currentUser.uid ? " mine" : "");
+          (message.sender === currentUser.uid ? " mine" : "")
+        );
 
-        if (m.type === "image" && m.image) {
-          const img = document.createElement("img");
-          img.src = m.image;
-          img.alt = "Gambar pesan";
-          img.loading = "lazy";
-          bubble.append(img);
+        if (message.type === "image" && message.image) {
+          const image = document.createElement("img");
+          image.src = message.image;
+          image.alt = "Gambar pesan";
+          image.loading = "lazy";
+          bubble.append(image);
         } else {
-          const content = document.createElement("div");
-          content.textContent = m.text || "";
-          bubble.append(content);
+          bubble.append(
+            safeElement("div", "", message.text || "")
+          );
         }
 
-        const time = document.createElement("small");
-
-        time.textContent =
-          m.createdAt?.toDate
-            ? m.createdAt.toDate().toLocaleTimeString("id-ID", {
+        const time = safeElement(
+          "small",
+          "",
+          message.createdAt?.toDate
+            ? message.createdAt.toDate().toLocaleTimeString("id-ID", {
                 hour: "2-digit",
                 minute: "2-digit"
               })
-            : "Mengirim...";
+            : "Mengirim..."
+        );
 
         bubble.append(time);
-        messages.append(bubble);
+        container.append(bubble);
       });
 
-      messages.scrollTop = messages.scrollHeight;
-    }, e => {
-      alert(reportError(e));
+      container.scrollTop = container.scrollHeight;
+
+    }, error => {
+      alert(errorMessage(error));
     });
 
-  } catch (e) {
-    alert(reportError(e));
+  } catch (error) {
+    alert(errorMessage(error));
   }
 }
 
-// ======================================
-// KIRIM PESAN
-// ======================================
+// ==========================================
+// SEND MESSAGE
+// ==========================================
 
 async function sendMessage(text, imageUrl = null) {
-  if (!activeChat || !currentUser) return;
+  if (!activeChat || !currentUser) {
+    throw new Error("Pilih percakapan terlebih dahulu.");
+  }
 
   const id = chatId(currentUser.uid, activeChat.uid);
 
@@ -410,7 +439,7 @@ async function sendMessage(text, imageUrl = null) {
       sender: currentUser.uid,
       text: text || "",
       type: imageUrl ? "image" : "text",
-      image: imageUrl || null,
+      image: imageUrl,
       createdAt: serverTimestamp()
     }
   );
@@ -431,38 +460,38 @@ $("sendBtn").onclick = async () => {
   try {
     await sendMessage(text);
     $("messageInput").value = "";
-  } catch (e) {
-    alert(reportError(e));
+  } catch (error) {
+    alert(errorMessage(error));
   } finally {
     $("sendBtn").disabled = false;
   }
 };
 
-$("messageInput").onkeydown = e => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
+$("messageInput").onkeydown = event => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
     $("sendBtn").click();
   }
 };
 
-// ======================================
-// KIRIM GAMBAR
-// ======================================
+// ==========================================
+// SEND IMAGE
+// ==========================================
 
-$("imageInput").onchange = async e => {
-  const file = e.target.files[0];
+$("imageInput").onchange = async event => {
+  const file = event.target.files[0];
 
   if (!file || !activeChat || !currentUser) return;
 
   if (!file.type.startsWith("image/")) {
     alert("File harus berupa gambar.");
-    e.target.value = "";
+    event.target.value = "";
     return;
   }
 
   if (file.size > 5 * 1024 * 1024) {
     alert("Ukuran gambar maksimal 5 MB.");
-    e.target.value = "";
+    event.target.value = "";
     return;
   }
 
@@ -479,16 +508,17 @@ $("imageInput").onchange = async e => {
     await sendMessage("", url);
 
     alert("Gambar berhasil dikirim.");
-  } catch (e) {
-    alert(reportError(e));
+
+  } catch (error) {
+    alert(errorMessage(error));
   } finally {
-    $("imageInput").value = "";
+    event.target.value = "";
   }
 };
 
-// ======================================
-// DAFTAR CHAT REALTIME
-// ======================================
+// ==========================================
+// CHAT LIST
+// ==========================================
 
 function listenChats() {
   if (!currentUser) return;
@@ -506,10 +536,11 @@ function listenChats() {
 
     try {
       const users = await Promise.all(
-        snap.docs.map(async d => {
-          const data = d.data();
+        snap.docs.map(async document => {
+          const data = document.data();
+
           const otherId = data.members?.find(
-            x => x !== currentUser.uid
+            id => id !== currentUser.uid
           );
 
           if (!otherId) return null;
@@ -518,37 +549,36 @@ function listenChats() {
 
           if (!userSnap.exists()) return null;
 
-          const u = userSnap.data();
+          const user = userSnap.data();
 
-          if (u.status !== "active") return null;
-
-          return u;
+          return user.status === "active" ? user : null;
         })
       );
 
-      users.filter(Boolean).forEach(u => {
-        const item = document.createElement("div");
-        item.className = "chat-item";
+      users.filter(Boolean).forEach(user => {
+        const item = safeElement("div", "chat-item");
 
-        const name = document.createElement("strong");
-
-        name.textContent =
-          (u.name || "Pengguna") + (u.verified ? " ✓" : "");
+        const name = safeElement(
+          "strong",
+          "",
+          user.name + (user.verified ? " ✓" : "")
+        );
 
         item.append(name);
-        item.onclick = () => openChat(u);
+        item.onclick = () => openChat(user);
 
         list.append(item);
       });
-    } catch (e) {
-      console.error("Daftar chat:", e);
+
+    } catch (error) {
+      console.error("Chat list:", error);
     }
   });
 }
 
-// ======================================
-// PROFIL
-// ======================================
+// ==========================================
+// PROFILE
+// ==========================================
 
 $("profileBtn").onclick = () => {
   if (!currentProfile) return;
@@ -569,8 +599,8 @@ $("saveProfile").onclick = async () => {
   const name = $("profileName").value.trim();
   const bio = $("profileBio").value.trim();
 
-  if (!name) {
-    alert("Nama harus diisi.");
+  if (name.length < 3) {
+    alert("Nama minimal 3 karakter.");
     return;
   }
 
@@ -581,21 +611,20 @@ $("saveProfile").onclick = async () => {
     });
 
     $("profileModal").hidden = true;
-  } catch (e) {
-    alert(reportError(e));
+
+  } catch (error) {
+    alert(errorMessage(error));
   }
 };
 
-// ======================================
-// STATUS TEKS
-// ======================================
+// ==========================================
+// STATUS
+// ==========================================
 
 function createStatusButton() {
-  const button = document.createElement("button");
+  const button = safeElement("button", "", "+ Buat status");
 
   button.id = "addStatus";
-  button.textContent = "+ Buat status";
-
   button.onclick = async () => {
     const text = prompt("Tulis status:");
 
@@ -610,8 +639,9 @@ function createStatusButton() {
       });
 
       alert("Status berhasil dibuat.");
-    } catch (e) {
-      alert(reportError(e));
+
+    } catch (error) {
+      alert(errorMessage(error));
     }
   };
 
@@ -619,9 +649,12 @@ function createStatusButton() {
 }
 
 function listenStatuses() {
+  if (!currentUser) return;
+
   if (statusUnsubscribe) statusUnsubscribe();
 
   const list = $("statusList");
+
   list.replaceChildren(createStatusButton());
 
   const q = query(
@@ -633,39 +666,45 @@ function listenStatuses() {
   statusUnsubscribe = onSnapshot(q, snap => {
     list.replaceChildren(createStatusButton());
 
-    snap.forEach(d => {
-      const s = d.data();
+    snap.forEach(document => {
+      const status = document.data();
 
-      const item = document.createElement("div");
-      item.className = "user-item";
+      const item = safeElement("div", "user-item");
 
-      const name = document.createElement("strong");
-      name.textContent = s.name || "Pengguna";
+      const name = safeElement(
+        "strong",
+        "",
+        status.name || "Pengguna"
+      );
 
-      const content = document.createElement("small");
-      content.textContent = s.text || "";
+      const content = safeElement(
+        "small",
+        "",
+        status.text || ""
+      );
 
       item.append(name, content);
 
       item.onclick = () => {
-        alert((s.name || "Pengguna") + ": " + (s.text || ""));
+        alert((status.name || "Pengguna") + ": " + (status.text || ""));
       };
 
       list.append(item);
     });
-  }, e => {
-    console.error("Status:", e);
+
+  }, error => {
+    console.error("Status:", error);
   });
 }
 
-// ======================================
-// BANDING AKUN
-// ======================================
+// ==========================================
+// APPEAL
+// ==========================================
 
 $("appealBtn").onclick = async () => {
-  const text = $("appealText").value.trim();
-
   if (!currentUser) return;
+
+  const text = $("appealText").value.trim();
 
   if (text.length < 10) {
     $("appealMessage").textContent =
@@ -688,15 +727,16 @@ $("appealBtn").onclick = async () => {
       "Banding berhasil dikirim.";
 
     $("appealText").value = "";
-  } catch (e) {
-    $("appealMessage").textContent = reportError(e);
+
+  } catch (error) {
+    $("appealMessage").textContent = errorMessage(error);
     $("appealBtn").disabled = false;
   }
 };
 
-// ======================================
-// PANEL ADMIN
-// ======================================
+// ==========================================
+// ADMIN PANEL
+// ==========================================
 
 $("openAdmin").onclick = () => {
   if (!isAdmin()) return;
@@ -716,11 +756,11 @@ $("findAdminUser").onclick = async () => {
   }
 
   const uid = $("adminSearch").value.trim();
+  const result = $("adminUserResult");
+
+  result.replaceChildren();
 
   if (!uid) return;
-
-  const result = $("adminUserResult");
-  result.replaceChildren();
 
   try {
     const snap = await getDoc(doc(db, "users", uid));
@@ -730,35 +770,34 @@ $("findAdminUser").onclick = async () => {
       return;
     }
 
-    const u = snap.data();
+    const user = snap.data();
 
-    const card = document.createElement("div");
-    card.className = "admin-user";
+    const card = safeElement("div", "admin-user");
 
-    const title = document.createElement("strong");
-    title.textContent = (u.name || "Pengguna") + " — " + (u.email || "");
+    card.append(
+      safeElement(
+        "strong",
+        "",
+        (user.name || "Pengguna") + " — " + (user.email || "")
+      ),
+      safeElement("p", "", "Status: " + user.status)
+    );
 
-    const status = document.createElement("p");
-    status.textContent = "Status: " + (u.status || "unknown");
-
-    card.append(title, status);
-
-    function action(label, callback) {
-      const button = document.createElement("button");
-      button.textContent = label;
+    function addAction(label, callback) {
+      const button = safeElement("button", "", label);
       button.onclick = callback;
       card.append(button);
     }
 
-    action("Centang biru", () =>
+    addAction("Centang biru", () =>
       moderate(uid, { verified: true })
     );
 
-    action("Cabut centang", () =>
+    addAction("Cabut centang", () =>
       moderate(uid, { verified: false })
     );
 
-    action("Tahan sementara", () => {
+    addAction("Tahan sementara", () => {
       const reason = prompt("Alasan penahanan:");
 
       if (reason?.trim()) {
@@ -769,7 +808,7 @@ $("findAdminUser").onclick = async () => {
       }
     });
 
-    action("Permanenkan", () => {
+    addAction("Permanenkan", () => {
       if (confirm("Permanenkan akun ini?")) {
         moderate(uid, {
           status: "permanent",
@@ -778,7 +817,7 @@ $("findAdminUser").onclick = async () => {
       }
     });
 
-    action("Pulihkan akun", () => {
+    addAction("Pulihkan akun", () => {
       if (confirm("Pulihkan akun ini?")) {
         moderate(uid, {
           status: "active",
@@ -788,14 +827,15 @@ $("findAdminUser").onclick = async () => {
     });
 
     result.append(card);
-  } catch (e) {
-    result.textContent = reportError(e);
+
+  } catch (error) {
+    result.textContent = errorMessage(error);
   }
 };
 
-// ======================================
-// MODERASI
-// ======================================
+// ==========================================
+// MODERATION
+// ==========================================
 
 async function moderate(uid, changes) {
   if (!isAdmin()) {
@@ -811,16 +851,16 @@ async function moderate(uid, changes) {
     });
 
     alert("Perubahan berhasil disimpan.");
-
     $("findAdminUser").click();
-  } catch (e) {
-    alert(reportError(e));
+
+  } catch (error) {
+    alert(errorMessage(error));
   }
 }
 
-// ======================================
-// DAFTAR BANDING ADMIN
-// ======================================
+// ==========================================
+// ADMIN APPEALS
+// ==========================================
 
 async function loadAppeals() {
   if (!isAdmin()) return;
@@ -843,61 +883,63 @@ async function loadAppeals() {
       return;
     }
 
-    snap.forEach(d => {
-      const a = d.data();
+    snap.forEach(document => {
+      const appeal = document.data();
 
-      const card = document.createElement("div");
-      card.className = "admin-user";
+      const card = safeElement("div", "admin-user");
 
-      const details = document.createElement("p");
-      details.textContent =
-        (a.email || "Email tidak tersedia") + " — " + (a.text || "");
+      const details = safeElement(
+        "p",
+        "",
+        (appeal.email || "Tanpa email") + " — " + (appeal.text || "")
+      );
 
-      const approve = document.createElement("button");
-      approve.textContent = "Terima banding";
+      const approve = safeElement("button", "", "Terima banding");
 
       approve.onclick = async () => {
         try {
-          await moderate(a.uid, {
+          await moderate(appeal.uid, {
             status: "active",
             reason: ""
           });
 
-          await updateDoc(doc(db, "appeals", d.id), {
+          await updateDoc(doc(db, "appeals", document.id), {
             status: "approved"
           });
 
           loadAppeals();
-        } catch (e) {
-          alert(reportError(e));
+
+        } catch (error) {
+          alert(errorMessage(error));
         }
       };
 
-      const reject = document.createElement("button");
-      reject.textContent = "Tolak banding";
+      const reject = safeElement("button", "", "Tolak banding");
 
       reject.onclick = async () => {
         try {
-          await updateDoc(doc(db, "appeals", d.id), {
+          await updateDoc(doc(db, "appeals", document.id), {
             status: "rejected"
           });
 
           loadAppeals();
-        } catch (e) {
-          alert(reportError(e));
+
+        } catch (error) {
+          alert(errorMessage(error));
         }
       };
 
       card.append(details, approve, reject);
       list.append(card);
     });
-  } catch (e) {
-    list.textContent = reportError(e);
+
+  } catch (error) {
+    list.textContent = errorMessage(error);
   }
 }
 
-// ======================================
-// SELESAI
-// ======================================
+// ==========================================
+// READY
+// ==========================================
 
-console.log("ZORAAPP initialized successfully.");
+console.log("ZORAAPP app.js loaded.");
