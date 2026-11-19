@@ -1,0 +1,142 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#eaf0f8">
+<title>ZORAAPP</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="authScreen" class="auth-screen">
+  <div class="auth-card glass">
+    <div class="logo">Z</div>
+    <h1>ZORAAPP</h1>
+    <p>Connect with everyone.</p>
+    <div id="authError" class="error"></div>
+    <input id="authName" placeholder="Nama pengguna">
+    <input id="authEmail" type="email" placeholder="Email">
+    <input id="authPassword" type="password" placeholder="Password">
+    <button id="loginBtn">Masuk</button>
+    <button id="registerBtn" class="secondary">Buat akun</button>
+  </div>
+</div>
+
+<div id="holdScreen" class="special-screen" hidden>
+  <div class="special-card glass">
+    <div class="special-icon">!</div>
+    <h1>AKUN ANDA KAMI TAHAN!</h1>
+    <p>AJUKAN BANDING MELALUI TOMBOL DIBAWAH</p>
+    <textarea id="appealText" placeholder="Tuliskan alasan banding..."></textarea>
+    <button id="appealBtn">BANDING</button>
+    <p id="appealMessage"></p>
+    <button id="logoutHold" class="secondary">Keluar</button>
+  </div>
+</div>
+
+<div id="permanentScreen" class="special-screen" hidden>
+  <div class="special-card glass">
+    <div class="special-icon">!</div>
+    <h1>AKUN ANDA DIPERMANENKAN!</h1>
+    <p>Akun ini telah dinonaktifkan secara permanen.</p>
+    <button id="newAccountBtn">DAFTARKAN AKUN BARU</button>
+  </div>
+</div>
+
+<div id="appScreen" hidden>
+  <header class="topbar glass">
+    <div class="brand"><span>Z</span> ZORAAPP</div>
+    <div class="header-actions">
+      <button id="themeBtn" title="Tema">Tema</button>
+      <button id="profileBtn">Profil</button>
+      <button id="logoutBtn">Keluar</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar glass">
+      <div class="profile-mini">
+        <div class="avatar" id="myAvatar">Z</div>
+        <div>
+          <strong id="myName">Pengguna</strong>
+          <small id="myEmail"></small>
+        </div>
+      </div>
+
+      <div class="search">
+        <input id="searchUser" placeholder="Cari pengguna...">
+      </div>
+      <div id="searchResults"></div>
+
+      <div class="section-title">PESAN</div>
+      <div id="chatList"></div>
+
+      <div class="section-title">STATUS</div>
+      <div id="statusList"></div>
+
+      <div id="adminLink" hidden>
+        <button id="openAdmin">PANEL ADMIN</button>
+      </div>
+    </aside>
+
+    <section class="chat-area glass">
+      <div id="emptyChat" class="empty">
+        <div class="empty-logo">Z</div>
+        <h2>Selamat datang di ZORAAPP</h2>
+        <p>Pilih percakapan untuk mulai mengirim pesan.</p>
+      </div>
+
+      <div id="chatPanel" hidden>
+        <div class="chat-header">
+          <div class="avatar" id="chatAvatar">U</div>
+          <div>
+            <strong id="chatName">Pengguna</strong>
+            <small id="chatVerified"></small>
+          </div>
+        </div>
+        <div id="messages" class="messages"></div>
+        <div class="composer">
+          <label class="attach">
+            +
+            <input id="imageInput" type="file" accept="image/*" hidden>
+          </label>
+          <input id="messageInput" placeholder="Tulis pesan...">
+          <button id="sendBtn">Kirim</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="adminScreen" class="modal" hidden>
+  <div class="admin-card glass">
+    <div class="admin-head">
+      <h2>ADMIN CONTROL</h2>
+      <button id="closeAdmin">Tutup</button>
+    </div>
+
+    <h3>Kelola pengguna</h3>
+    <input id="adminSearch" placeholder="Cari UID pengguna">
+    <button id="findAdminUser">Cari</button>
+    <div id="adminUserResult"></div>
+
+    <h3>Permohonan banding</h3>
+    <div id="appealList"></div>
+  </div>
+</div>
+
+<div id="profileModal" class="modal" hidden>
+  <div class="admin-card glass">
+    <h2>Profil saya</h2>
+    <input id="profileName" placeholder="Nama">
+    <input id="profileBio" placeholder="Bio">
+    <button id="saveProfile">Simpan profil</button>
+    <button id="closeProfile" class="secondary">Tutup</button>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
