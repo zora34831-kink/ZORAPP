@@ -9,14 +9,25 @@ import {
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
 
 import {
-  doc, getDoc, setDoc, updateDoc,
-  collection, addDoc, query, where,
-  orderBy, onSnapshot, serverTimestamp,
-  getDocs, limit
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  addDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  serverTimestamp,
+  getDocs,
+  limit
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
 
 import {
-  ref, uploadBytes, getDownloadURL
+  ref,
+  uploadBytes,
+  getDownloadURL
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-storage.js";
 
 // ==========================================
@@ -37,7 +48,8 @@ let messageUnsubscribe = null;
 let statusUnsubscribe = null;
 
 let searchTimer = null;
-let authReady = false;
+let registrationInProgress = false;
+let profileCreationPromise = null;
 
 // ==========================================
 // UTILITIES
@@ -46,7 +58,8 @@ let authReady = false;
 function showScreen(id) {
   ["authScreen", "holdScreen", "permanentScreen", "appScreen"]
     .forEach(screen => {
-      $(screen).hidden = screen !== id;
+      const element = $(screen);
+      if (element) element.hidden = screen !== id;
     });
 }
 
@@ -56,7 +69,20 @@ function setError(id, message) {
 
 function errorMessage(error) {
   console.error(error);
-  return error?.message || "Terjadi kesalahan.";
+
+  const messages = {
+    "auth/email-already-in-use": "Email sudah terdaftar. Silakan login.",
+    "auth/invalid-credential": "Email atau password salah.",
+    "auth/invalid-email": "Format email tidak valid.",
+    "auth/weak-password": "Password terlalu lemah.",
+    "auth/user-disabled": "Akun ini dinonaktifkan.",
+    "auth/too-many-requests": "Terlalu banyak percobaan. Coba lagi nanti.",
+    "permission-denied": "Akses Firestore ditolak. Periksa Firestore Rules."
+  };
+
+  return messages[error?.code] ||
+    error?.message ||
+    "Terjadi kesalahan.";
 }
 
 function isAdmin() {
@@ -81,8 +107,10 @@ function cleanupListeners() {
 
 function safeElement(tag, className, text) {
   const element = document.createElement(tag);
+
   if (className) element.className = className;
   if (text !== undefined) element.textContent = text;
+
   return element;
 }
 
@@ -139,6 +167,7 @@ $("registerBtn").onclick = async () => {
   }
 
   $("registerBtn").disabled = true;
+  registrationInProgress = true;
 
   try {
     const credential = await createUserWithEmailAndPassword(
@@ -164,9 +193,31 @@ $("registerBtn").onclick = async () => {
   } catch (error) {
     setError("registerError", errorMessage(error));
   } finally {
+    registrationInProgress = false;
     $("registerBtn").disabled = false;
   }
 };
+
+// ==========================================
+// CREATE MISSING PROFILE
+// ==========================================
+
+async function ensureUserProfile(user) {
+  const userRef = doc(db, "users", user.uid);
+  const existing = await getDoc(userRef);
+
+  if (existing.exists()) return;
+
+  await setDoc(userRef, {
+    uid: user.uid,
+    name: user.displayName || user.email?.split("@")[0] || "Pengguna",
+    email: user.email || "",
+    bio: "",
+    verified: false,
+    status: "active",
+    createdAt: serverTimestamp()
+  });
+}
 
 // ==========================================
 // AUTH STATE
@@ -178,6 +229,7 @@ onAuthStateChanged(auth, user => {
   currentUser = user;
   currentProfile = null;
   activeChat = null;
+  profileCreationPromise = null;
 
   if (!user) {
     showScreen("authScreen");
@@ -189,7 +241,24 @@ onAuthStateChanged(auth, user => {
   profileUnsubscribe = onSnapshot(userRef, snap => {
     if (!snap.exists()) {
       showScreen("authScreen");
-      setError("authError", "Profil akun tidak ditemukan.");
+
+      if (registrationInProgress) return;
+
+      if (!profileCreationPromise) {
+        profileCreationPromise = ensureUserProfile(user)
+          .catch(error => {
+            console.error("Profile creation:", error);
+
+            setError(
+              "authError",
+              "Gagal membuat profil: " + errorMessage(error)
+            );
+          })
+          .finally(() => {
+            profileCreationPromise = null;
+          });
+      }
+
       return;
     }
 
@@ -225,6 +294,7 @@ onAuthStateChanged(auth, user => {
 
   }, error => {
     console.error("Profile listener:", error);
+
     showScreen("authScreen");
     setError("authError", errorMessage(error));
   });
@@ -237,9 +307,13 @@ onAuthStateChanged(auth, user => {
 async function logout() {
   try {
     await signOut(auth);
+
     $("authPassword").value = "";
     $("registerPassword").value = "";
+
     setError("authError", "");
+    setError("registerError", "");
+
   } catch (error) {
     alert(errorMessage(error));
   }
@@ -298,13 +372,14 @@ async function searchUsers() {
       ) {
         const item = safeElement("div", "user-item");
 
-        const name = safeElement(
-          "strong",
-          "",
-          user.name + (user.verified ? " ✓" : "")
+        item.append(
+          safeElement(
+            "strong",
+            "",
+            user.name + (user.verified ? " ✓" : "")
+          )
         );
 
-        item.append(name);
         item.onclick = () => openChat(user);
 
         results.append(item);
@@ -358,12 +433,7 @@ async function openChat(other) {
 
     if (messageUnsubscribe) messageUnsubscribe();
 
-    const messagesRef = collection(
-      db,
-      "chats",
-      id,
-      "messages"
-    );
+    const messagesRef = collection(db, "chats", id, "messages");
 
     const q = query(
       messagesRef,
@@ -386,9 +456,11 @@ async function openChat(other) {
 
         if (message.type === "image" && message.image) {
           const image = document.createElement("img");
+
           image.src = message.image;
           image.alt = "Gambar pesan";
           image.loading = "lazy";
+
           bubble.append(image);
         } else {
           bubble.append(
@@ -558,13 +630,14 @@ function listenChats() {
       users.filter(Boolean).forEach(user => {
         const item = safeElement("div", "chat-item");
 
-        const name = safeElement(
-          "strong",
-          "",
-          user.name + (user.verified ? " ✓" : "")
+        item.append(
+          safeElement(
+            "strong",
+            "",
+            user.name + (user.verified ? " ✓" : "")
+          )
         );
 
-        item.append(name);
         item.onclick = () => openChat(user);
 
         list.append(item);
@@ -625,6 +698,7 @@ function createStatusButton() {
   const button = safeElement("button", "", "+ Buat status");
 
   button.id = "addStatus";
+
   button.onclick = async () => {
     const text = prompt("Tulis status:");
 
@@ -671,22 +745,15 @@ function listenStatuses() {
 
       const item = safeElement("div", "user-item");
 
-      const name = safeElement(
-        "strong",
-        "",
-        status.name || "Pengguna"
+      item.append(
+        safeElement("strong", "", status.name || "Pengguna"),
+        safeElement("small", "", status.text || "")
       );
-
-      const content = safeElement(
-        "small",
-        "",
-        status.text || ""
-      );
-
-      item.append(name, content);
 
       item.onclick = () => {
-        alert((status.name || "Pengguna") + ": " + (status.text || ""));
+        alert(
+          (status.name || "Pengguna") + ": " + (status.text || "")
+        );
       };
 
       list.append(item);
@@ -730,6 +797,7 @@ $("appealBtn").onclick = async () => {
 
   } catch (error) {
     $("appealMessage").textContent = errorMessage(error);
+  } finally {
     $("appealBtn").disabled = false;
   }
 };
@@ -843,6 +911,11 @@ async function moderate(uid, changes) {
     return;
   }
 
+  if (uid === ADMIN_UID) {
+    alert("Akun administrator utama tidak dapat dimoderasi.");
+    return;
+  }
+
   try {
     await updateDoc(doc(db, "users", uid), {
       ...changes,
@@ -942,4 +1015,4 @@ async function loadAppeals() {
 // READY
 // ==========================================
 
-console.log("ZORAAPP app.js loaded.");
+console.log("ZORAAPP app.js loaded successfully.");
