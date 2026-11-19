@@ -1813,3 +1813,360 @@ body.theme-neon .round-action{
     border-radius: 22px;
   }
 }
+
+
+/* =========================================
+   ZORAAPP TEXT & LAYOUT REPAIR
+   Override untuk elemen yang bertumpuk
+========================================= */
+
+/* Perbaikan dasar teks */
+* {
+  min-width: 0;
+}
+
+body {
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+}
+
+h1, h2, h3, h4, p, small, strong, span {
+  max-width: 100%;
+}
+
+button {
+  line-height: 1.35;
+}
+
+/* Nama dan deskripsi tidak saling menimpa */
+.chat-item-details,
+.status-details,
+.profile-info,
+.conversation-user,
+.security-copy {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.chat-item-details strong,
+.user-item strong,
+.profile-info strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.45;
+}
+
+.chat-item-details small,
+.user-item small,
+.profile-info small,
+.conversation-user small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+/* Badge verifikasi tidak mendorong nama */
+.verified-badge {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+
+/* Status: avatar - teks - tombol */
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.status-item .status-details {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.status-item .status-details strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.status-item .status-details small {
+  display: block;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.status-item .secondary-btn {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 95px;
+  min-width: 0;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* Header percakapan */
+.conversation-header {
+  min-width: 0;
+}
+
+.conversation-user {
+  overflow: hidden;
+}
+
+.conversation-user strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+/* Pesan panjang */
+.bubble {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.bubble small {
+  line-height: 1.5;
+}
+
+.message-footer {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.message-ticks {
+  letter-spacing: -2px;
+  padding-right: 3px;
+  line-height: 1.2;
+}
+
+/* Tombol menu chat */
+.chat-row-actions {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.chat-row-more {
+  flex-shrink: 0;
+}
+
+/* Panel dan modal */
+.panel,
+.modal-card,
+.zora-modal-card,
+.zora-dialog-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.modal-card h2,
+.zora-modal-heading h2,
+.zora-dialog-card h2 {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.modal-card input,
+.modal-card textarea,
+.zora-dialog-input {
+  max-width: 100%;
+}
+
+/* Notifikasi */
+.toast {
+  width: max-content;
+  max-width: calc(100vw - 30px);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* Profil */
+.settings-profile {
+  min-width: 0;
+}
+
+.profile-photo-editor {
+  min-width: 0;
+}
+
+.profile-photo-editor small {
+  max-width: 100%;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* =========================================
+   CHANNEL FOLLOWER DISPLAY
+========================================= */
+
+.channel-info,
+.channel-details,
+.channel-item-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1 1 0;
+  min-width: 0;
+  gap: 4px;
+}
+
+.channel-info strong,
+.channel-details strong,
+.channel-item-details strong {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.45;
+}
+
+.channel-followers,
+.follower-count,
+.channel-item-details small {
+  display: block;
+  width: 100%;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* =========================================
+   MOBILE REPAIR
+========================================= */
+
+@media (max-width: 800px) {
+  .page {
+    min-width: 0;
+    padding: 18px 13px;
+  }
+
+  .page-heading {
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .page-heading > div {
+    min-width: 0;
+  }
+
+  .page-heading h2 {
+    font-size: 19px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .page-heading p {
+    line-height: 1.5;
+  }
+
+  .chat-item,
+  .user-item {
+    min-width: 0;
+    gap: 9px;
+    padding: 12px 7px;
+  }
+
+  .avatar {
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+  }
+
+  .conversation-header {
+    gap: 9px;
+    padding: 9px 10px;
+  }
+
+  .conversation-user strong {
+    font-size: 12px;
+  }
+
+  .conversation-user small {
+    font-size: 9px;
+  }
+
+  .messages {
+    min-width: 0;
+    padding: 12px;
+  }
+
+  .bubble {
+    max-width: 88%;
+    font-size: 12px;
+  }
+
+  .composer {
+    min-width: 0;
+    gap: 6px;
+    padding: 9px 8px;
+  }
+
+  .composer input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .send-button {
+    flex: 0 0 auto;
+    padding: 11px 12px;
+    font-size: 10px;
+  }
+
+  .mobile-nav {
+    gap: 2px;
+  }
+
+  .mobile-nav .nav-button {
+    min-width: 0;
+    padding: 8px 1px;
+    font-size: 9px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .security-copy {
+    min-width: 0;
+  }
+
+  .security-copy strong,
+  .security-copy small {
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 360px) {
+  .header-actions button {
+    padding: 6px;
+    font-size: 8px;
+  }
+
+  .brand {
+    font-size: 10px;
+  }
+
+  .mobile-nav .nav-button {
+    font-size: 8px;
+  }
+
+  .status-item .secondary-btn {
+    padding: 0 7px;
+    font-size: 10px;
+  }
+}
