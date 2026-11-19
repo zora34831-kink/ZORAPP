@@ -1,5 +1,5 @@
 
-import { auth, db, storage } from "./firebase.js";
+import { auth, db, storage, rtdb } from "./firebase.js";
 
 import {
   signInWithEmailAndPassword,
@@ -13,55 +13,80 @@ import {
   doc, getDoc, setDoc, updateDoc, deleteDoc,
   collection, addDoc, getDocs, query, where,
   orderBy, onSnapshot, serverTimestamp, limit,
-  runTransaction, arrayUnion
+  runTransaction, arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
 
 import {
   ref, uploadBytes, getDownloadURL
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-storage.js";
 
+import {
+  ref as dbRef,
+  set,
+  onValue,
+  onDisconnect,
+  remove,
+  serverTimestamp as rtdbTimestamp
+} from "https://www.gstatic.com/firebasejs/13.4.0/firebase-database.js";
+
 // ======================================================
 // CONFIG
 // ======================================================
 
 const ADMIN_UID = "PbeBf6CtGLVWvX2RqnuvXBWyePG2";
+
 const $ = id => document.getElementById(id);
 const exists = id => Boolean($(id));
+
 const THEMES = ["neon", "dark", "light", "purple"];
 
 let currentUser = null;
 let currentProfile = null;
 let activeChat = null;
 let activeChatType = "private";
+
 let unsubscribers = [];
 let messageUnsubscribe = null;
 let appListenersStarted = false;
 let toastTimer = null;
-let registrationInProgress = false;
 let searchTimer = null;
+let typingTimer = null;
+let presenceUnsubscribe = null;
+let typingUnsubscribe = null;
 let firstMessageSnapshot = true;
 let lastNotificationTime = 0;
+let registrationInProgress = false;
+
+const presenceCache = new Map();
 
 // ======================================================
 // HELPERS
 // ======================================================
 
 function on(id, event, callback) {
-  if (exists(id)) $(id).addEventListener(event, callback);
+  if (exists(id)) {
+    $(id).addEventListener(event, callback);
+  }
 }
 
 function setText(id, value) {
-  if (exists(id)) $(id).textContent = value ?? "";
+  if (exists(id)) {
+    $(id).textContent = value ?? "";
+  }
 }
 
 function setHidden(id, hidden) {
-  if (exists(id)) $(id).hidden = hidden;
+  if (exists(id)) {
+    $(id).hidden = hidden;
+  }
 }
 
 function safeElement(tag, className = "", text) {
   const el = document.createElement(tag);
+
   if (className) el.className = className;
   if (text !== undefined) el.textContent = text;
+
   return el;
 }
 
@@ -72,26 +97,65 @@ function isAdmin() {
 function errorMessage(error) {
   console.error(error);
 
-  const code = error?.code || "";
   const messages = {
-    "auth/email-already-in-use": "Email sudah terdaftar. Silakan masuk.",
+    "auth/email-already-in-use": "Email sudah terdaftar.",
     "auth/invalid-credential": "Email atau password salah.",
     "auth/invalid-email": "Format email tidak valid.",
     "auth/weak-password": "Password minimal 8 karakter.",
     "auth/user-disabled": "Akun dinonaktifkan.",
-    "auth/too-many-requests": "Terlalu banyak percobaan. Coba lagi nanti.",
+    "auth/too-many-requests": "Terlalu banyak percobaan.",
     "auth/network-request-failed": "Koneksi internet bermasalah.",
-    "permission-denied": "Akses Firestore ditolak. Periksa Firestore Rules.",
+    "permission-denied": "Akses ditolak. Periksa Firebase Rules.",
     "storage/unauthorized": "Akses foto ditolak. Periksa Storage Rules.",
-    "storage/canceled": "Upload foto dibatalkan.",
-    "unavailable": "Layanan sedang tidak tersedia. Coba lagi."
+    "unavailable": "Layanan sedang tidak tersedia."
   };
 
-  return messages[code] || error?.message || "Terjadi kesalahan.";
+  return messages[error?.code] ||
+    error?.message ||
+    "Terjadi kesalahan.";
+}
+
+function formatTime(value) {
+  const date = value?.toDate
+    ? value.toDate()
+    : value instanceof Date
+      ? value
+      : null;
+
+  if (!date) return "";
+
+  return date.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+}
+
+function formatLastSeen(timestamp) {
+  if (!timestamp) return "Terakhir dilihat belum diketahui";
+
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Terakhir dilihat belum diketahui";
+  }
+
+  return `Terakhir dilihat pukul ${date.toLocaleTimeString(
+    "id-ID",
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }
+  )}`;
+}
+
+function timestampMillis(value) {
+  return value?.toMillis?.() || 0;
 }
 
 // ======================================================
-// PREMIUM TOAST
+// TOAST
 // ======================================================
 
 function toast(message) {
@@ -113,7 +177,7 @@ function toast(message) {
 }
 
 // ======================================================
-// PREMIUM CUSTOM DIALOG
+// CUSTOM DIALOG
 // ======================================================
 
 function zoraDialog({
@@ -131,31 +195,28 @@ function zoraDialog({
     const overlay = safeElement("div", "zora-dialog-overlay");
     const card = safeElement("div", "zora-dialog-card");
 
-    const kicker = safeElement(
-      "div",
-      "zora-dialog-kicker",
-      "ZORAAPP / SYSTEM"
+    card.append(
+      safeElement("div", "zora-dialog-kicker", "ZORAAPP / SYSTEM"),
+      safeElement("h2", "", title),
+      safeElement("p", "", message)
     );
-
-    const heading = safeElement("h2", "", title);
-    const description = safeElement("p", "", message);
-
-    card.append(kicker, heading, description);
 
     let field = null;
 
     if (input) {
-      field = document.createElement(multiline ? "textarea" : "input");
+      field = document.createElement(
+        multiline ? "textarea" : "input"
+      );
+
       field.className = "zora-dialog-input";
       field.placeholder = placeholder;
       field.value = defaultValue;
+      field.maxLength = multiline ? 500 : 100;
 
       if (multiline) {
         field.rows = 4;
-        field.maxLength = 500;
       } else {
         field.type = "text";
-        field.maxLength = 100;
       }
 
       card.append(field);
@@ -175,8 +236,7 @@ function zoraDialog({
       confirmText
     );
 
-    cancel.type = "button";
-    confirm.type = "button";
+    cancel.type = confirm.type = "button";
 
     actions.append(cancel, confirm);
     card.append(actions);
@@ -187,6 +247,7 @@ function zoraDialog({
 
     function close(value) {
       if (finished) return;
+
       finished = true;
       overlay.remove();
       document.removeEventListener("keydown", keyHandler);
@@ -210,32 +271,30 @@ function zoraDialog({
     cancel.onclick = () => close(null);
 
     confirm.onclick = () => {
-      if (input) {
-        const value = field.value.trim();
-
-        if (!value) {
-          field.focus();
-          field.classList.add("invalid");
-          return;
-        }
-
-        close(value);
-      } else {
+      if (!input) {
         close(true);
+        return;
       }
+
+      const value = field.value.trim();
+
+      if (!value) {
+        field.focus();
+        return;
+      }
+
+      close(value);
     };
 
-    overlay.addEventListener("click", event => {
+    overlay.onclick = event => {
       if (event.target === overlay) close(null);
-    });
+    };
 
     document.addEventListener("keydown", keyHandler);
 
-    if (input) {
-      setTimeout(() => field.focus(), 80);
-    } else {
-      setTimeout(() => confirm.focus(), 80);
-    }
+    setTimeout(() => {
+      (field || confirm).focus();
+    }, 80);
   });
 }
 
@@ -244,7 +303,6 @@ async function zoraConfirm(message, options = {}) {
     title: options.title || "Konfirmasi tindakan",
     message,
     confirmText: options.confirmText || "Ya, lanjutkan",
-    cancelText: "Batal",
     danger: Boolean(options.danger)
   })) === true;
 }
@@ -260,7 +318,7 @@ async function zoraPrompt(title, message, placeholder = "") {
 }
 
 // ======================================================
-// VERIFIED BADGE - SVG
+// VERIFIED BADGE
 // ======================================================
 
 function createVerifiedBadge() {
@@ -271,7 +329,6 @@ function createVerifiedBadge() {
 
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("class", "verified-badge");
-  svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Akun terverifikasi");
 
   const badge = document.createElementNS(
@@ -299,51 +356,65 @@ function createVerifiedBadge() {
   check.setAttribute("stroke-linejoin", "round");
 
   svg.append(badge, check);
+
   return svg;
 }
 
 function renderVerifiedName(element, name, verified = false) {
-  if (typeof element === "string") element = $(element);
+  if (typeof element === "string") {
+    element = $(element);
+  }
+
   if (!element) return;
 
   element.replaceChildren(
     document.createTextNode(name || "Pengguna")
   );
 
-  if (verified === true) {
+  if (verified) {
     element.append(createVerifiedBadge());
   }
 }
 
 function createNameElement(name, verified = false) {
   const element = safeElement("strong");
+
   renderVerifiedName(element, name, verified);
+
   return element;
 }
 
 // ======================================================
-// CLEANUP
+// AVATAR
 // ======================================================
 
-function stopMessageListener() {
-  if (messageUnsubscribe) {
-    messageUnsubscribe();
-    messageUnsubscribe = null;
+function renderAvatarInto(element, photoURL, name = "Z") {
+  element.replaceChildren();
+
+  if (!photoURL) {
+    element.textContent = (name || "Z")[0].toUpperCase();
+    return;
   }
+
+  const image = document.createElement("img");
+
+  image.src = photoURL;
+  image.alt = "Foto profil";
+  image.className = "avatar-photo";
+
+  image.onerror = () => {
+    element.textContent = (name || "Z")[0].toUpperCase();
+  };
+
+  element.append(image);
 }
 
-function cleanup() {
-  unsubscribers.forEach(unsubscribe => {
-    try {
-      unsubscribe();
-    } catch {}
-  });
+function renderAvatar(id, photoURL, name = "Z") {
+  const element = $(id);
 
-  unsubscribers = [];
-  stopMessageListener();
-
-  activeChat = null;
-  appListenersStarted = false;
+  if (element) {
+    renderAvatarInto(element, photoURL, name);
+  }
 }
 
 // ======================================================
@@ -376,6 +447,7 @@ function applyTheme(theme) {
 function cycleTheme() {
   const current = localStorage.getItem("zora-theme") || "dark";
   const index = THEMES.indexOf(current);
+
   const next = THEMES[(index + 1) % THEMES.length];
 
   applyTheme(next);
@@ -407,9 +479,7 @@ async function claimUsername(username, uid, oldUsername = "") {
   const oldNormalized = normalizeUsername(oldUsername);
 
   if (!validUsername(normalized)) {
-    throw new Error(
-      "Username harus 3–20 karakter, huruf kecil, angka, atau underscore."
-    );
+    throw new Error("Username harus 3–20 karakter.");
   }
 
   await runTransaction(db, async transaction => {
@@ -443,6 +513,214 @@ async function claimUsername(username, uid, oldUsername = "") {
 }
 
 // ======================================================
+// CLEANUP
+// ======================================================
+
+function stopMessageListener() {
+  if (messageUnsubscribe) {
+    messageUnsubscribe();
+    messageUnsubscribe = null;
+  }
+}
+
+function stopTypingListener() {
+  if (typingUnsubscribe) {
+    typingUnsubscribe();
+    typingUnsubscribe = null;
+  }
+}
+
+function stopPresenceListener() {
+  if (presenceUnsubscribe) {
+    presenceUnsubscribe();
+    presenceUnsubscribe = null;
+  }
+}
+
+function cleanup() {
+  unsubscribers.forEach(unsubscribe => {
+    try {
+      unsubscribe();
+    } catch {}
+  });
+
+  unsubscribers = [];
+
+  stopMessageListener();
+  stopTypingListener();
+  stopPresenceListener();
+
+  activeChat = null;
+  appListenersStarted = false;
+}
+
+// ======================================================
+// PRESENCE: ONLINE / OFFLINE
+// ======================================================
+
+async function setupPresence() {
+  if (!currentUser) return;
+
+  const connectedRef = dbRef(rtdb, ".info/connected");
+  const statusRef = dbRef(rtdb, `status/${currentUser.uid}`);
+
+  presenceUnsubscribe = onValue(
+    connectedRef,
+    async snapshot => {
+      if (snapshot.val() !== true) return;
+
+      try {
+        await onDisconnect(statusRef).set({
+          state: "offline",
+          last_changed: rtdbTimestamp()
+        });
+
+        await set(statusRef, {
+          state: "online",
+          last_changed: rtdbTimestamp()
+        });
+      } catch (error) {
+        console.warn("Presence error:", error);
+      }
+    }
+  );
+}
+
+async function setOffline() {
+  if (!currentUser) return;
+
+  try {
+    await set(
+      dbRef(rtdb, `status/${currentUser.uid}`),
+      {
+        state: "offline",
+        last_changed: rtdbTimestamp()
+      }
+    );
+  } catch (error) {
+    console.warn(error);
+  }
+}
+
+function listenPresence(uid, callback) {
+  const statusRef = dbRef(rtdb, `status/${uid}`);
+
+  return onValue(
+    statusRef,
+    snapshot => {
+      const data = snapshot.val();
+
+      presenceCache.set(uid, data || null);
+
+      callback(data || null);
+    },
+    error => {
+      console.warn("Presence listener:", error);
+      callback(null);
+    }
+  );
+}
+
+// ======================================================
+// TYPING INDICATOR
+// ======================================================
+
+function typingPath() {
+  if (!activeChat || !currentUser) return null;
+
+  return `typing/${activeChatType}_${activeChat.id}/${currentUser.uid}`;
+}
+
+async function updateTyping(isTyping) {
+  const path = typingPath();
+
+  if (!path) return;
+
+  try {
+    const typingRef = dbRef(rtdb, path);
+
+    if (isTyping) {
+      await set(typingRef, {
+        typing: true,
+        name: currentProfile?.name || "Pengguna",
+        updatedAt: rtdbTimestamp()
+      });
+    } else {
+      await remove(typingRef);
+    }
+  } catch (error) {
+    console.warn("Typing update:", error);
+  }
+}
+
+function listenTyping() {
+  stopTypingListener();
+
+  if (!activeChat || !currentUser) return;
+
+  const path = `typing/${activeChatType}_${activeChat.id}`;
+
+  typingUnsubscribe = onValue(
+    dbRef(rtdb, path),
+    snapshot => {
+      const users = snapshot.val() || {};
+
+      const typingUsers = Object.entries(users)
+        .filter(([uid, data]) => (
+          uid !== currentUser.uid &&
+          data?.typing === true &&
+          Date.now() - Number(data.updatedAt || 0) < 12000
+        ));
+
+      let text = "";
+
+      if (typingUsers.length === 1) {
+        text = `${typingUsers[0][1].name || "Pengguna"} sedang mengetik...`;
+      } else if (typingUsers.length > 1) {
+        text = "Beberapa orang sedang mengetik...";
+      }
+
+      setTypingIndicator(text);
+    }
+  );
+}
+
+function setTypingIndicator(text) {
+  let element = $("typingIndicator");
+
+  if (!element) {
+    const panel = $("chatPanel");
+    if (!panel) return;
+
+    element = safeElement("div", "typing-indicator");
+    element.id = "typingIndicator";
+
+    const messages = $("messages");
+
+    if (messages) {
+      messages.before(element);
+    } else {
+      panel.append(element);
+    }
+  }
+
+  element.textContent = text || "";
+  element.hidden = !text;
+}
+
+on("messageInput", "input", () => {
+  if (!activeChat || activeChatType === "channel") return;
+
+  updateTyping(true);
+
+  clearTimeout(typingTimer);
+
+  typingTimer = setTimeout(() => {
+    updateTyping(false);
+  }, 1800);
+});
+
+// ======================================================
 // AUTH
 // ======================================================
 
@@ -471,8 +749,6 @@ on("loginBtn", "click", async () => {
 on("forgotPassword", "click", async () => {
   const email = $("authEmail")?.value.trim();
 
-  setText("authError", "");
-
   if (!email) {
     setText("authError", "Masukkan email terlebih dahulu.");
     return;
@@ -480,7 +756,7 @@ on("forgotPassword", "click", async () => {
 
   try {
     await sendPasswordResetEmail(auth, email);
-    toast("Link reset password sudah dikirim ke email.");
+    toast("Link reset password sudah dikirim.");
   } catch (error) {
     setText("authError", errorMessage(error));
   }
@@ -490,7 +766,9 @@ on("registerBtn", "click", async () => {
   const name = $("authName")?.value.trim();
   const email = $("registerEmail")?.value.trim();
   const password = $("registerPassword")?.value;
-  const username = normalizeUsername($("registerUsername")?.value);
+  const username = normalizeUsername(
+    $("registerUsername")?.value
+  );
 
   setText("registerError", "");
 
@@ -508,10 +786,7 @@ on("registerBtn", "click", async () => {
   }
 
   if (!validUsername(username)) {
-    setText(
-      "registerError",
-      "Username harus 3–20 karakter: huruf kecil, angka, atau underscore."
-    );
+    setText("registerError", "Format username tidak valid.");
     return;
   }
 
@@ -548,8 +823,8 @@ on("registerBtn", "click", async () => {
     $("registerEmail").value = "";
     $("registerPassword").value = "";
     $("registerUsername").value = "";
+
     $("authEmail").value = email;
-    $("authPassword").value = "";
 
     setHidden("registerMode", true);
     setHidden("loginMode", false);
@@ -557,13 +832,6 @@ on("registerBtn", "click", async () => {
     toast("AKUN BERHASIL DIBUAT, SILAHKAN MASUK");
   } catch (error) {
     setText("registerError", errorMessage(error));
-
-    if (credential) {
-      console.error(
-        "Auth berhasil dibuat, tetapi profil gagal disimpan.",
-        error
-      );
-    }
   } finally {
     registrationInProgress = false;
     $("registerBtn").disabled = false;
@@ -571,49 +839,8 @@ on("registerBtn", "click", async () => {
 });
 
 // ======================================================
-// AVATAR + PROFILE PHOTO
+// PROFILE PHOTO
 // ======================================================
-
-function renderAvatar(elementId, photoURL, name = "Z") {
-  const element = $(elementId);
-  if (!element) return;
-
-  element.replaceChildren();
-
-  if (photoURL) {
-    const image = document.createElement("img");
-    image.src = photoURL;
-    image.alt = "Foto profil";
-    image.className = "avatar-photo";
-
-    image.onerror = () => {
-      element.textContent = (name || "Z")[0].toUpperCase();
-    };
-
-    element.append(image);
-  } else {
-    element.textContent = (name || "Z")[0].toUpperCase();
-  }
-}
-
-function renderAvatarInto(element, photoURL, name = "Z") {
-  element.replaceChildren();
-
-  if (photoURL) {
-    const image = document.createElement("img");
-    image.src = photoURL;
-    image.alt = "Foto profil";
-    image.className = "avatar-photo";
-
-    image.onerror = () => {
-      element.textContent = (name || "Z")[0].toUpperCase();
-    };
-
-    element.append(image);
-  } else {
-    element.textContent = (name || "Z")[0].toUpperCase();
-  }
-}
 
 function createProfilePhotoControls() {
   const modal = $("profileModal");
@@ -635,15 +862,17 @@ function createProfilePhotoControls() {
   label.htmlFor = "profilePhotoInput";
 
   const input = document.createElement("input");
+
   input.type = "file";
   input.id = "profilePhotoInput";
   input.accept = "image/jpeg,image/png,image/webp";
   input.hidden = true;
 
-  input.addEventListener("change", event => {
+  input.onchange = event => {
     const file = event.target.files?.[0];
+
     if (file) uploadProfilePhoto(file);
-  });
+  };
 
   controls.append(
     preview,
@@ -653,11 +882,12 @@ function createProfilePhotoControls() {
   );
 
   const card = modal.querySelector(".modal-card");
+
   (card || modal).prepend(controls);
 }
 
 async function uploadProfilePhoto(file) {
-  if (!currentUser || !file) return;
+  if (!currentUser) return;
 
   if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
     toast("Format foto tidak didukung.");
@@ -670,6 +900,7 @@ async function uploadProfilePhoto(file) {
   }
 
   const input = $("profilePhotoInput");
+
   if (input) input.disabled = true;
 
   try {
@@ -702,7 +933,7 @@ async function uploadProfilePhoto(file) {
       currentProfile.name
     );
 
-    toast("Foto profil berhasil diperbarui.");
+    toast("Foto profil diperbarui.");
   } catch (error) {
     toast(errorMessage(error));
   } finally {
@@ -732,6 +963,7 @@ onAuthStateChanged(auth, user => {
     ].forEach(id => setHidden(id, true));
 
     setHidden("authScreen", false);
+
     return;
   }
 
@@ -751,7 +983,6 @@ onAuthStateChanged(auth, user => {
             name: user.email?.split("@")[0] || "Pengguna",
             email: user.email || "",
             username: "",
-            usernameLower: "",
             bio: "",
             photoURL: "",
             verified: false,
@@ -823,6 +1054,8 @@ onAuthStateChanged(auth, user => {
       if (!appListenersStarted) {
         appListenersStarted = true;
 
+        setupPresence();
+
         listenChats();
         listenStatuses();
         listenGroups();
@@ -836,11 +1069,12 @@ onAuthStateChanged(auth, user => {
 });
 
 // ======================================================
-// LOGOUT + ACCOUNT
+// LOGOUT
 // ======================================================
 
 async function logout() {
   try {
+    await setOffline();
     cleanup();
     await signOut(auth);
   } catch (error) {
@@ -857,7 +1091,10 @@ async function logout() {
 ].forEach(id => on(id, "click", logout));
 
 on("verifyAccountBtn", "click", async () => {
-  if (!currentUser || currentProfile?.status !== "recovered") return;
+  if (
+    !currentUser ||
+    currentProfile?.status !== "recovered"
+  ) return;
 
   try {
     await updateDoc(doc(db, "users", currentUser.uid), {
@@ -865,7 +1102,7 @@ on("verifyAccountBtn", "click", async () => {
       verifiedAt: serverTimestamp()
     });
 
-    toast("Akun berhasil diaktifkan kembali.");
+    toast("Akun berhasil dipulihkan.");
   } catch (error) {
     toast(errorMessage(error));
   }
@@ -898,11 +1135,12 @@ document.querySelectorAll(".nav-button").forEach(button => {
 });
 
 on("backToChats", "click", () => {
+  updateTyping(false);
   openPage("chatsPage");
 });
 
 // ======================================================
-// CHAT SECURITY NOTICE
+// CONVERSATION HEADER
 // ======================================================
 
 function createChatSecurityNotice() {
@@ -913,7 +1151,6 @@ function createChatSecurityNotice() {
   const notice = safeElement("div", "chat-security-notice");
   notice.id = "chatSecurityNotice";
 
-  const mark = safeElement("span", "security-mark", "i");
   const text = safeElement("div", "security-copy");
 
   text.append(
@@ -921,11 +1158,14 @@ function createChatSecurityNotice() {
     safeElement(
       "small",
       "",
-      "Koneksi menggunakan Firebase. Enkripsi end-to-end belum aktif."
+      "Enkripsi end-to-end belum aktif. Jangan kirim informasi rahasia."
     )
   );
 
-  notice.append(mark, text);
+  notice.append(
+    safeElement("span", "security-mark", "i"),
+    text
+  );
 
   const header = panel.querySelector(".conversation-header");
 
@@ -937,13 +1177,7 @@ function showConversation(name, verified = false) {
   setHidden("emptyChat", true);
   setHidden("chatPanel", false);
 
-  renderVerifiedName(
-    "chatName",
-    name,
-    verified === true
-  );
-
-  setHidden("chatVerified", true);
+  renderVerifiedName("chatName", name, verified);
 
   renderAvatar(
     "chatAvatar",
@@ -956,6 +1190,37 @@ function showConversation(name, verified = false) {
   if (window.innerWidth <= 800) {
     $("appScreen")?.classList.add("chat-open");
   }
+
+  updateComposerAccess();
+}
+
+function updateComposerAccess() {
+  const composer = $("messageInput");
+  const send = $("sendBtn");
+  const image = $("imageInput");
+
+  if (!composer || !send) return;
+
+  const isChannel = activeChatType === "channel";
+
+  const canPost = !isChannel ||
+    isAdmin() ||
+    activeChat?.owner === currentUser?.uid;
+
+  composer.hidden = !canPost;
+  send.hidden = !canPost;
+
+  if (image) {
+    image.hidden = !canPost;
+  }
+
+  if (isChannel && !canPost) {
+    composer.value = "";
+  }
+
+  composer.placeholder = isChannel
+    ? "Tulis postingan saluran..."
+    : "Ketik pesan...";
 }
 
 // ======================================================
@@ -977,20 +1242,16 @@ async function findExistingPrivateChat(otherUid) {
   const matches = snap.docs.filter(item => {
     const members = item.data().members || [];
 
-    return (
-      members.includes(otherUid) &&
-      members.length === 2
-    );
+    return members.length === 2 &&
+      members.includes(otherUid);
   });
 
   if (!matches.length) return null;
 
-  matches.sort((a, b) => {
-    const at = a.data().updatedAt?.toMillis?.() || 0;
-    const bt = b.data().updatedAt?.toMillis?.() || 0;
-
-    return bt - at;
-  });
+  matches.sort((a, b) =>
+    timestampMillis(b.data().updatedAt) -
+    timestampMillis(a.data().updatedAt)
+  );
 
   return matches[0];
 }
@@ -998,17 +1259,11 @@ async function findExistingPrivateChat(otherUid) {
 async function openPrivateChat(other) {
   if (!currentUser || !other?.uid) return;
 
-  if (other.status && other.status !== "active") {
-    toast("Pengguna tidak tersedia.");
-    return;
-  }
-
   try {
     const existing = await findExistingPrivateChat(other.uid);
-    const id = existing?.id || privateChatId(
-      currentUser.uid,
-      other.uid
-    );
+
+    const id = existing?.id ||
+      privateChatId(currentUser.uid, other.uid);
 
     const chatRef = doc(db, "chats", id);
 
@@ -1058,31 +1313,506 @@ async function openPrivateChat(other) {
 
     activeChatType = "private";
 
-    setText("sendBtn", "Kirim");
-
     showConversation(
       activeChat.name,
       activeChat.verified
     );
 
     listenMessages("chats", id);
+    listenTyping();
+    listenOtherPresence(other.uid);
   } catch (error) {
-    console.error("OPEN CHAT ERROR:", error);
     toast(errorMessage(error));
   }
+}
+
+// ======================================================
+// LAST SEEN
+// ======================================================
+
+function listenOtherPresence(uid) {
+  const old = $("chatPresence");
+
+  if (old) old.remove();
+
+  const panel = $("chatPanel");
+  const header = panel?.querySelector(".conversation-header");
+
+  if (!header) return;
+
+  const element = safeElement("small", "chat-presence");
+  element.id = "chatPresence";
+
+  header.append(element);
+
+  const unsubscribe = listenPresence(uid, data => {
+    if (!data) {
+      element.textContent = "Trạngi tidak diketahui";
+      return;
+    }
+
+    if (data.state === "online") {
+      element.textContent = "Online";
+      element.classList.add("is-online");
+    } else {
+      element.classList.remove("is-online");
+      element.textContent = formatLastSeen(data.last_changed);
+    }
+  });
+
+  unsubscribers.push(unsubscribe);
+}
+
+// ======================================================
+// GROUPS
+// ======================================================
+
+async function createGroup() {
+  const name = await zoraPrompt(
+    "Buat grup",
+    "Masukkan nama grup.",
+    "Nama grup"
+  );
+
+  if (!name) return;
+
+  try {
+    const group = await addDoc(collection(db, "groups"), {
+      name: name.trim(),
+      owner: currentUser.uid,
+      members: [currentUser.uid],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    toast("Grup berhasil dibuat.");
+
+    openGroup(group.id, name.trim());
+  } catch (error) {
+    toast(errorMessage(error));
+  }
+}
+
+on("createGroupBtn", "click", createGroup);
+
+function listenGroups() {
+  const q = query(
+    collection(db, "groups"),
+    where("members", "array-contains", currentUser.uid)
+  );
+
+  const unsubscribe = onSnapshot(
+    q,
+    snap => {
+      const list = $("groupList");
+      if (!list) return;
+
+      list.replaceChildren();
+
+      snap.forEach(item => {
+        const group = item.data();
+
+        const row = safeElement("div", "chat-item");
+        const avatar = safeElement("div", "avatar", "G");
+        const details = safeElement("div", "chat-item-details");
+
+        details.append(
+          safeElement("strong", "", group.name || "Grup"),
+          safeElement(
+            "small",
+            "",
+            `${group.members?.length || 1} anggota`
+          )
+        );
+
+        row.append(avatar, details);
+
+        row.onclick = () => {
+          openGroup(item.id, group.name);
+        };
+
+        list.append(row);
+      });
+    },
+    error => toast(errorMessage(error))
+  );
+
+  unsubscribers.push(unsubscribe);
+}
+
+async function inviteGroupMember(groupId) {
+  const username = normalizeUsername(
+    await zoraPrompt(
+      "Undang anggota",
+      "Masukkan username pengguna yang ingin ditambahkan.",
+      "username"
+    )
+  );
+
+  if (!username) return;
+
+  try {
+    const groupRef = doc(db, "groups", groupId);
+    const groupSnap = await getDoc(groupRef);
+
+    if (!groupSnap.exists()) {
+      throw new Error("Grup tidak ditemukan.");
+    }
+
+    const group = groupSnap.data();
+
+    if (
+      !group.members?.includes(currentUser.uid)
+    ) {
+      throw new Error("Lu bukan anggota grup ini.");
+    }
+
+    const usernameSnap = await getDoc(
+      doc(db, "usernames", username)
+    );
+
+    if (!usernameSnap.exists()) {
+      throw new Error("Username tidak ditemukan.");
+    }
+
+    const uid = usernameSnap.data().uid;
+
+    if (group.members.includes(uid)) {
+      toast("Pengguna sudah menjadi anggota.");
+      return;
+    }
+
+    await updateDoc(groupRef, {
+      members: arrayUnion(uid),
+      updatedAt: serverTimestamp()
+    });
+
+    toast("Anggota berhasil ditambahkan.");
+  } catch (error) {
+    toast(errorMessage(error));
+  }
+}
+
+function openGroup(id, name) {
+  activeChat = { id, name };
+  activeChatType = "group";
+
+  showConversation(name, false);
+
+  let inviteButton = $("inviteGroupMember");
+
+  if (!inviteButton) {
+    inviteButton = safeElement(
+      "button",
+      "group-invite-button",
+      "Tambah anggota"
+    );
+
+    inviteButton.id = "inviteGroupMember";
+
+    $("chatPanel")?.querySelector(
+      ".conversation-header"
+    )?.append(inviteButton);
+  }
+
+  inviteButton.hidden = false;
+  inviteButton.onclick = () => inviteGroupMember(id);
+
+  listenMessages("groups", id);
+  listenTyping();
+}
+
+// ======================================================
+// CHANNELS
+// ======================================================
+
+on("createChannelBtn", "click", async () => {
+  const name = await zoraPrompt(
+    "Buat saluran",
+    "Masukkan nama saluran.",
+    "Nama saluran"
+  );
+
+  if (!name) return;
+
+  const description = await zoraPrompt(
+    "Deskripsi saluran",
+    "Masukkan deskripsi saluran.",
+    "Deskripsi"
+  );
+
+  try {
+    const channel = await addDoc(collection(db, "channels"), {
+      name: name.trim(),
+      description: description || "",
+      owner: currentUser.uid,
+      followers: [currentUser.uid],
+      createdAt: serverTimestamp()
+    });
+
+    toast("Saluran berhasil dibuat.");
+
+    openChannel(
+      channel.id,
+      name.trim(),
+      currentUser.uid
+    );
+  } catch (error) {
+    toast(errorMessage(error));
+  }
+});
+
+function listenChannels() {
+  const q = query(
+    collection(db, "channels"),
+    orderBy("createdAt", "desc"),
+    limit(100)
+  );
+
+  const unsubscribe = onSnapshot(
+    q,
+    snap => {
+      const list = $("channelList");
+      if (!list) return;
+
+      list.replaceChildren();
+
+      snap.forEach(item => {
+        const channel = item.data();
+
+        const row = safeElement("div", "chat-item");
+        const avatar = safeElement("div", "avatar", "S");
+        const details = safeElement("div", "chat-item-details");
+
+        details.append(
+          safeElement("strong", "", channel.name || "Saluran"),
+          safeElement(
+            "small",
+            "",
+            `${channel.followers?.length || 0} pengikut`
+          )
+        );
+
+        row.append(avatar, details);
+
+        row.onclick = () => {
+          openChannel(
+            item.id,
+            channel.name,
+            channel.owner
+          );
+        };
+
+        list.append(row);
+      });
+    },
+    error => toast(errorMessage(error))
+  );
+
+  unsubscribers.push(unsubscribe);
+}
+
+async function toggleFollowChannel(channelId) {
+  try {
+    const channelRef = doc(db, "channels", channelId);
+    const snap = await getDoc(channelRef);
+
+    if (!snap.exists()) {
+      throw new Error("Saluran tidak ditemukan.");
+    }
+
+    const channel = snap.data();
+    const followers = channel.followers || [];
+
+    const following = followers.includes(currentUser.uid);
+
+    await updateDoc(channelRef, {
+      followers: following
+        ? arrayRemove(currentUser.uid)
+        : arrayUnion(currentUser.uid)
+    });
+
+    toast(
+      following
+        ? "Berhenti mengikuti saluran."
+        : "Berhasil mengikuti saluran."
+    );
+
+    if (activeChat?.id === channelId) {
+      activeChat.followers = following
+        ? followers.filter(uid => uid !== currentUser.uid)
+        : [...followers, currentUser.uid];
+
+      renderChannelControls();
+    }
+  } catch (error) {
+    toast(errorMessage(error));
+  }
+}
+
+function renderChannelControls() {
+  const channel = activeChat;
+
+  if (!channel || activeChatType !== "channel") return;
+
+  let controls = $("channelControls");
+
+  if (!controls) {
+    controls = safeElement("div", "channel-controls");
+    controls.id = "channelControls";
+
+    const header = $("chatPanel")?.querySelector(
+      ".conversation-header"
+    );
+
+    if (header) header.after(controls);
+  }
+
+  controls.replaceChildren();
+
+  const count = safeElement(
+    "span",
+    "channel-follower-count",
+    `${channel.followers?.length || 0} pengikut`
+  );
+
+  controls.append(count);
+
+  const owner = channel.owner === currentUser.uid;
+  const following = (channel.followers || []).includes(
+    currentUser.uid
+  );
+
+  if (!owner) {
+    const button = safeElement(
+      "button",
+      following ? "secondary-btn" : "primary-btn",
+      following ? "Berhenti mengikuti" : "Ikuti"
+    );
+
+    button.type = "button";
+    button.onclick = () => toggleFollowChannel(channel.id);
+
+    controls.append(button);
+  }
+
+  updateComposerAccess();
+}
+
+async function openChannel(id, name, owner) {
+  stopMessageListener();
+
+  const snap = await getDoc(doc(db, "channels", id));
+
+  if (!snap.exists()) {
+    toast("Saluran tidak ditemukan.");
+    return;
+  }
+
+  const channel = snap.data();
+
+  activeChat = {
+    id,
+    name,
+    owner,
+    followers: channel.followers || []
+  };
+
+  activeChatType = "channel";
+
+  showConversation(name, false);
+
+  renderChannelControls();
+
+  const q = query(
+    collection(db, "channels", id, "posts"),
+    orderBy("createdAt", "asc"),
+    limit(100)
+  );
+
+  messageUnsubscribe = onSnapshot(
+    q,
+    snapshot => {
+      const container = $("messages");
+      if (!container) return;
+
+      container.replaceChildren();
+
+      snapshot.forEach(item => {
+        const post = item.data();
+        const bubble = safeElement("div", "bubble");
+
+        bubble.append(
+          safeElement(
+            "div",
+            "message-body",
+            post.text || ""
+          ),
+          safeElement(
+            "small",
+            "",
+            `${post.authorName || "Admin"} · ${formatTime(post.createdAt)}`
+          )
+        );
+
+        if (
+          post.uid === currentUser.uid ||
+          isAdmin()
+        ) {
+          const del = safeElement(
+            "button",
+            "message-delete",
+            "Hapus"
+          );
+
+          del.type = "button";
+
+          del.onclick = async () => {
+            const confirmed = await zoraConfirm(
+              "Hapus postingan ini?",
+              {
+                title: "Hapus postingan",
+                confirmText: "Hapus",
+                danger: true
+              }
+            );
+
+            if (!confirmed) return;
+
+            try {
+              await deleteDoc(
+                doc(
+                  db,
+                  "channels",
+                  id,
+                  "posts",
+                  item.id
+                )
+              );
+
+              toast("Postingan dihapus.");
+            } catch (error) {
+              toast(errorMessage(error));
+            }
+          };
+
+          bubble.append(del);
+        }
+
+        container.append(bubble);
+      });
+
+      container.scrollTop = container.scrollHeight;
+    },
+    error => toast(errorMessage(error))
+  );
 }
 
 // ======================================================
 // MESSAGE ACTION MENU
 // ======================================================
 
-function createMessageActionMenu(
-  messageRef,
-  messageData,
-  root,
-  chatId,
-  messageId
-) {
+function createMessageActionMenu(messageRef, data) {
   const wrapper = safeElement("div", "message-actions");
 
   const trigger = safeElement(
@@ -1092,7 +1822,6 @@ function createMessageActionMenu(
   );
 
   trigger.type = "button";
-  trigger.title = "Opsi pesan";
 
   const menu = safeElement("div", "message-menu");
   menu.hidden = true;
@@ -1100,53 +1829,50 @@ function createMessageActionMenu(
   trigger.onclick = event => {
     event.stopPropagation();
 
-    document.querySelectorAll(".message-menu").forEach(el => {
-      if (el !== menu) el.hidden = true;
+    document.querySelectorAll(".message-menu").forEach(item => {
+      if (item !== menu) item.hidden = true;
     });
 
     menu.hidden = !menu.hidden;
   };
 
-  const hideForMe = safeElement(
+  const hide = safeElement(
     "button",
     "",
     "Hapus untuk saya"
   );
 
-  hideForMe.type = "button";
+  hide.type = "button";
 
-  hideForMe.onclick = async () => {
-    menu.hidden = true;
-
+  hide.onclick = async () => {
     try {
       await updateDoc(messageRef, {
         deletedFor: arrayUnion(currentUser.uid)
       });
 
-      toast("Pesan dihapus dari tampilan akun lu.");
+      toast("Pesan disembunyikan.");
     } catch (error) {
       toast(errorMessage(error));
     }
   };
 
-  menu.append(hideForMe);
+  menu.append(hide);
 
-  const isMine = messageData.sender === currentUser.uid;
-
-  if (isMine && !messageData.deleted) {
-    const deleteAll = safeElement(
+  if (
+    data.sender === currentUser.uid &&
+    !data.deleted
+  ) {
+    const removeAll = safeElement(
       "button",
       "danger-option",
       "Hapus untuk semua orang"
     );
 
-    deleteAll.type = "button";
+    removeAll.type = "button";
 
-    deleteAll.onclick = async () => {
-      menu.hidden = true;
-
+    removeAll.onclick = async () => {
       const confirmed = await zoraConfirm(
-        "Pesan ini akan diganti untuk semua orang. Lanjutkan?",
+        "Pesan akan dihapus untuk semua anggota.",
         {
           title: "Hapus pesan",
           confirmText: "Hapus",
@@ -1160,25 +1886,23 @@ function createMessageActionMenu(
         await updateDoc(messageRef, {
           text: "Pesan ini telah dihapus",
           deleted: true,
-          deletedBy: currentUser.uid,
           deletedAt: serverTimestamp()
         });
-
-        toast("Pesan dihapus untuk semua orang.");
       } catch (error) {
         toast(errorMessage(error));
       }
     };
 
-    menu.append(deleteAll);
+    menu.append(removeAll);
   }
 
   wrapper.append(trigger, menu);
+
   return wrapper;
 }
 
 // ======================================================
-// MESSAGE RECEIPTS
+// READ RECEIPTS
 // ======================================================
 
 function makeDoubleTick(isRead) {
@@ -1190,15 +1914,9 @@ function makeDoubleTick(isRead) {
   svg.setAttribute("viewBox", "0 0 22 16");
   svg.setAttribute("width", "19");
   svg.setAttribute("height", "14");
-
   svg.setAttribute(
     "class",
     `message-ticks${isRead ? " read" : ""}`
-  );
-
-  svg.setAttribute(
-    "aria-label",
-    isRead ? "Dibaca" : "Terkirim"
   );
 
   const path = document.createElementNS(
@@ -1218,36 +1936,8 @@ function makeDoubleTick(isRead) {
   path.setAttribute("stroke-linejoin", "round");
 
   svg.append(path);
+
   return svg;
-}
-
-// ======================================================
-// NOTIFICATIONS
-// ======================================================
-
-function notifyIncomingMessage(data) {
-  const now = Date.now();
-
-  if (now - lastNotificationTime < 500) return;
-
-  lastNotificationTime = now;
-
-  const sender = data.senderName || "Pesan baru";
-  const preview = data.text || "Mengirim pesan";
-
-  toast(`${sender}: ${preview.slice(0, 65)}`);
-
-  if (
-    "Notification" in window &&
-    Notification.permission === "granted"
-  ) {
-    try {
-      new Notification(`Pesan dari ${sender}`, {
-        body: preview.slice(0, 100),
-        tag: `zora-${activeChat?.id || "message"}`
-      });
-    } catch {}
-  }
 }
 
 // ======================================================
@@ -1256,16 +1946,17 @@ function notifyIncomingMessage(data) {
 
 function listenMessages(root, id) {
   stopMessageListener();
+
   firstMessageSnapshot = true;
 
-  const messageQuery = query(
+  const q = query(
     collection(db, root, id, "messages"),
     orderBy("createdAt", "asc"),
     limit(200)
   );
 
   messageUnsubscribe = onSnapshot(
-    messageQuery,
+    q,
     async snap => {
       const container = $("messages");
       if (!container) return;
@@ -1277,12 +1968,19 @@ function listenMessages(root, id) {
           const data = change.doc.data();
 
           if (data.sender !== currentUser.uid) {
-            const viewingThisChat =
-              activeChat?.id === id &&
+            const viewing = activeChat?.id === id &&
               !document.hidden;
 
-            if (!viewingThisChat) {
-              notifyIncomingMessage(data);
+            if (!viewing) {
+              const now = Date.now();
+
+              if (now - lastNotificationTime > 500) {
+                lastNotificationTime = now;
+
+                toast(
+                  `${data.senderName || "Pesan baru"}: ${(data.text || "").slice(0, 60)}`
+                );
+              }
             }
           }
         });
@@ -1291,26 +1989,26 @@ function listenMessages(root, id) {
       firstMessageSnapshot = false;
       container.replaceChildren();
 
-      const pendingReads = [];
+      const readUpdates = [];
 
       snap.forEach(item => {
         const data = item.data();
-        const mine = data.sender === currentUser.uid;
-        const deletedFor = data.deletedFor || [];
 
-        if (deletedFor.includes(currentUser.uid)) return;
+        const mine = data.sender === currentUser.uid;
+
+        if ((data.deletedFor || []).includes(currentUser.uid)) {
+          return;
+        }
 
         if (
           !mine &&
           !data.deleted &&
           !(data.readBy || []).includes(currentUser.uid)
         ) {
-          pendingReads.push(
+          readUpdates.push(
             updateDoc(item.ref, {
               readBy: arrayUnion(currentUser.uid)
-            }).catch(error => {
-              console.warn("Read receipt:", error);
-            })
+            }).catch(console.warn)
           );
         }
 
@@ -1319,7 +2017,10 @@ function listenMessages(root, id) {
           `bubble${mine ? " mine" : ""}${data.deleted ? " deleted-message" : ""}`
         );
 
-        if (activeChatType === "group" && !mine) {
+        if (
+          activeChatType === "group" &&
+          !mine
+        ) {
           bubble.append(
             safeElement(
               "strong",
@@ -1329,71 +2030,47 @@ function listenMessages(root, id) {
           );
         }
 
-        const bodyText = data.deleted
-          ? "Pesan ini telah dihapus"
-          : (data.text || "");
-
-        if (bodyText) {
-          bubble.append(
-            safeElement("div", "message-body", bodyText)
-          );
-        }
-
-        if (data.imageURL && !data.deleted) {
-          const image = document.createElement("img");
-
-          image.src = data.imageURL;
-          image.alt = "Gambar pesan";
-          image.loading = "lazy";
-
-          bubble.append(image);
-        }
+        bubble.append(
+          safeElement(
+            "div",
+            "message-body",
+            data.deleted
+              ? "Pesan ini telah dihapus"
+              : data.text || ""
+          )
+        );
 
         const footer = safeElement("div", "message-footer");
 
-        const time = data.createdAt?.toDate
-          ? data.createdAt.toDate().toLocaleTimeString(
-              "id-ID",
-              {
-                hour: "2-digit",
-                minute: "2-digit"
-              }
-            )
-          : "Mengirim...";
-
-        footer.append(safeElement("small", "", time));
+        footer.append(
+          safeElement("small", "", formatTime(data.createdAt))
+        );
 
         if (
           mine &&
           activeChatType === "private" &&
           !data.deleted
         ) {
-          const read = (data.readBy || []).includes(
-            activeChat.uid
+          footer.append(
+            makeDoubleTick(
+              (data.readBy || []).includes(activeChat.uid)
+            )
           );
-
-          footer.append(makeDoubleTick(read));
         }
 
         bubble.append(footer);
 
         if (!data.deleted) {
           bubble.append(
-            createMessageActionMenu(
-              item.ref,
-              data,
-              root,
-              id,
-              item.id
-            )
+            createMessageActionMenu(item.ref, data)
           );
         }
 
         container.append(bubble);
       });
 
-      if (pendingReads.length) {
-        await Promise.all(pendingReads);
+      if (readUpdates.length) {
+        await Promise.all(readUpdates);
       }
 
       container.scrollTop = container.scrollHeight;
@@ -1403,14 +2080,121 @@ function listenMessages(root, id) {
 }
 
 // ======================================================
+// SEND MESSAGE
+// ======================================================
+
+async function sendMessage(text) {
+  if (!activeChat || !currentUser) {
+    throw new Error("Pilih percakapan terlebih dahulu.");
+  }
+
+  const cleanText = text.trim();
+
+  if (!cleanText) return;
+
+  if (activeChatType === "channel") {
+    const allowed =
+      isAdmin() ||
+      activeChat.owner === currentUser.uid;
+
+    if (!allowed) {
+      throw new Error("Hanya admin saluran yang boleh posting.");
+    }
+
+    await addDoc(
+      collection(db, "channels", activeChat.id, "posts"),
+      {
+        uid: currentUser.uid,
+        authorName: currentProfile?.name || "Admin",
+        text: cleanText,
+        createdAt: serverTimestamp()
+      }
+    );
+
+    return;
+  }
+
+  const root = activeChatType === "group"
+    ? "groups"
+    : "chats";
+
+  const conversationRef = doc(
+    db,
+    root,
+    activeChat.id
+  );
+
+  const conversationSnap = await getDoc(conversationRef);
+
+  if (!conversationSnap.exists()) {
+    throw new Error("Percakapan tidak ditemukan.");
+  }
+
+  const members = conversationSnap.data().members || [];
+
+  if (!members.includes(currentUser.uid)) {
+    throw new Error("Akses percakapan ditolak.");
+  }
+
+  await addDoc(
+    collection(db, root, activeChat.id, "messages"),
+    {
+      sender: currentUser.uid,
+      senderName: currentProfile?.name || "Pengguna",
+      text: cleanText,
+      type: "text",
+      readBy: [currentUser.uid],
+      deletedFor: [],
+      deleted: false,
+      createdAt: serverTimestamp()
+    }
+  );
+
+  await updateDoc(conversationRef, {
+    lastMessage: cleanText,
+    lastMessageAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  updateTyping(false);
+}
+
+on("sendBtn", "click", async () => {
+  const text = $("messageInput")?.value.trim();
+
+  if (!text) return;
+
+  $("sendBtn").disabled = true;
+
+  try {
+    await sendMessage(text);
+    $("messageInput").value = "";
+  } catch (error) {
+    toast(errorMessage(error));
+  } finally {
+    $("sendBtn").disabled = false;
+  }
+});
+
+on("messageInput", "keydown", event => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    $("sendBtn")?.click();
+  }
+});
+
+on("imageInput", "change", event => {
+  event.target.value = "";
+  toast("Pengiriman gambar chat belum diaktifkan.");
+});
+
+// ======================================================
 // DELETE CHAT
 // ======================================================
 
 async function deleteChatForMe(chatId) {
-  if (!currentUser || !chatId) return;
-
   const confirmed = await zoraConfirm(
-    "Hapus chat ini dari daftar akun lu? Riwayat pengguna lain tidak akan terhapus.",
+    "Hapus percakapan dari daftar akun lu?",
     {
       title: "Hapus percakapan",
       confirmText: "Hapus",
@@ -1446,146 +2230,24 @@ async function deleteChatForMe(chatId) {
       $("appScreen")?.classList.remove("chat-open");
     }
 
-    toast("Chat dihapus dari daftar akun lu.");
+    toast("Percakapan dihapus dari daftar.");
   } catch (error) {
     toast(errorMessage(error));
   }
 }
-
-// ======================================================
-// SEND MESSAGE
-// ======================================================
-
-async function sendMessage(text) {
-  if (!activeChat || !currentUser) {
-    throw new Error("Pilih percakapan terlebih dahulu.");
-  }
-
-  const cleanText = text.trim();
-  if (!cleanText) return;
-
-  if (activeChatType === "channel") {
-    if (!isAdmin() && activeChat.owner !== currentUser.uid) {
-      throw new Error(
-        "Hanya pemilik saluran atau admin yang dapat posting."
-      );
-    }
-
-    await addDoc(
-      collection(db, "channels", activeChat.id, "posts"),
-      {
-        uid: currentUser.uid,
-        authorName: currentProfile?.name || "Pengguna",
-        text: cleanText,
-        createdAt: serverTimestamp()
-      }
-    );
-
-    return;
-  }
-
-  const root = activeChatType === "group"
-    ? "groups"
-    : "chats";
-
-  const chatRef = doc(db, root, activeChat.id);
-
-  await addDoc(
-    collection(db, root, activeChat.id, "messages"),
-    {
-      sender: currentUser.uid,
-      senderName: currentProfile?.name || "Pengguna",
-      text: cleanText,
-      type: "text",
-      readBy: [currentUser.uid],
-      deletedFor: [],
-      deleted: false,
-      createdAt: serverTimestamp()
-    }
-  );
-
-  await updateDoc(chatRef, {
-    lastMessage: cleanText,
-    lastMessageAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
-}
-
-on("sendBtn", "click", async () => {
-  const text = $("messageInput")?.value.trim();
-  if (!text) return;
-
-  $("sendBtn").disabled = true;
-
-  try {
-    await sendMessage(text);
-    $("messageInput").value = "";
-  } catch (error) {
-    toast(errorMessage(error));
-  } finally {
-    $("sendBtn").disabled = false;
-  }
-});
-
-on("messageInput", "keydown", event => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    $("sendBtn")?.click();
-  }
-});
-
-on("imageInput", "change", event => {
-  event.target.value = "";
-  toast("Pengiriman gambar chat belum diaktifkan.");
-});
 
 // ======================================================
 // CHAT LIST
 // ======================================================
 
-function timestampMillis(value) {
-  return value?.toMillis?.() || 0;
-}
-
-async function getUnreadCount(chatId) {
-  try {
-    const q = query(
-      collection(db, "chats", chatId, "messages"),
-      orderBy("createdAt", "desc"),
-      limit(100)
-    );
-
-    const snap = await getDocs(q);
-    let count = 0;
-
-    snap.forEach(item => {
-      const data = item.data();
-
-      if (
-        data.sender !== currentUser.uid &&
-        !(data.readBy || []).includes(currentUser.uid) &&
-        !(data.deletedFor || []).includes(currentUser.uid) &&
-        !data.deleted
-      ) {
-        count++;
-      }
-    });
-
-    return count;
-  } catch (error) {
-    console.warn("Unread count:", error);
-    return 0;
-  }
-}
-
-async function listenChats() {
-  const chatsQuery = query(
+function listenChats() {
+  const q = query(
     collection(db, "chats"),
     where("members", "array-contains", currentUser.uid)
   );
 
   const unsubscribe = onSnapshot(
-    chatsQuery,
+    q,
     async snap => {
       const list = $("chatList");
       if (!list) return;
@@ -1629,17 +2291,11 @@ async function listenChats() {
             ? timestampMillis(hiddenSnap.data().hiddenAt)
             : 0;
 
-          if (
-            hiddenSnap.exists() &&
-            lastActivity <= hiddenAt
-          ) {
+          if (hiddenSnap.exists() && lastActivity <= hiddenAt) {
             continue;
           }
 
-          if (
-            hiddenSnap.exists() &&
-            lastActivity > hiddenAt
-          ) {
+          if (hiddenSnap.exists() && lastActivity > hiddenAt) {
             deleteDoc(hiddenSnap.ref).catch(() => {});
           }
 
@@ -1651,18 +2307,18 @@ async function listenChats() {
             lastActivity
           });
         } catch (error) {
-          console.warn("Chat list item:", error);
+          console.warn(error);
         }
       }
 
       const unique = new Map();
 
       entries.forEach(entry => {
-        const old = unique.get(entry.otherId);
+        const previous = unique.get(entry.otherId);
 
         if (
-          !old ||
-          entry.lastActivity > old.lastActivity
+          !previous ||
+          entry.lastActivity > previous.lastActivity
         ) {
           unique.set(entry.otherId, entry);
         }
@@ -1679,16 +2335,14 @@ async function listenChats() {
           safeElement(
             "div",
             "chat-empty-note",
-            "Belum ada percakapan. Cari username untuk memulai."
+            "Belum ada percakapan."
           )
         );
 
         return;
       }
 
-      for (const entry of sorted) {
-        const unreadCount = await getUnreadCount(entry.id);
-
+      sorted.forEach(entry => {
         const row = safeElement("div", "chat-item");
 
         const avatar = safeElement("div", "avatar");
@@ -1706,7 +2360,7 @@ async function listenChats() {
 
         details.append(
           createNameElement(
-            entry.user.name || "Pengguna",
+            entry.user.name,
             entry.user.verified === true
           ),
           safeElement(
@@ -1721,18 +2375,6 @@ async function listenChats() {
           "chat-row-actions"
         );
 
-        if (unreadCount > 0) {
-          actions.append(
-            safeElement(
-              "span",
-              "unread-badge",
-              unreadCount > 99
-                ? "99+"
-                : String(unreadCount)
-            )
-          );
-        }
-
         const more = safeElement(
           "button",
           "chat-row-more",
@@ -1740,7 +2382,6 @@ async function listenChats() {
         );
 
         more.type = "button";
-        more.title = "Hapus chat";
 
         more.onclick = event => {
           event.stopPropagation();
@@ -1752,16 +2393,13 @@ async function listenChats() {
 
         row.onclick = () => {
           openPrivateChat({
-            uid: entry.otherId,
-            name: entry.user.name,
-            photoURL: entry.user.photoURL,
-            verified: entry.user.verified,
-            status: entry.user.status
+            ...entry.user,
+            uid: entry.otherId
           });
         };
 
         list.append(row);
-      }
+      });
     },
     error => toast(errorMessage(error))
   );
@@ -1775,37 +2413,30 @@ async function listenChats() {
 
 on("searchUser", "input", () => {
   clearTimeout(searchTimer);
+
   searchTimer = setTimeout(searchUsers, 350);
 });
 
 async function searchUsers() {
-  if (
-    !currentUser ||
-    !exists("searchUser") ||
-    !exists("searchResults")
-  ) {
-    return;
-  }
+  if (!currentUser || !exists("searchUser")) return;
 
-  const value = normalizeUsername($("searchUser").value);
+  const username = normalizeUsername($("searchUser").value);
   const results = $("searchResults");
+
+  if (!results) return;
 
   results.replaceChildren();
 
-  if (value.length < 3) return;
+  if (username.length < 3) return;
 
   try {
     const usernameSnap = await getDoc(
-      doc(db, "usernames", value)
+      doc(db, "usernames", username)
     );
 
     if (!usernameSnap.exists()) {
       results.append(
-        safeElement(
-          "small",
-          "search-empty",
-          "Username tidak ditemukan."
-        )
+        safeElement("small", "search-empty", "Username tidak ditemukan.")
       );
 
       return;
@@ -1815,11 +2446,7 @@ async function searchUsers() {
 
     if (uid === currentUser.uid) {
       results.append(
-        safeElement(
-          "small",
-          "search-empty",
-          "Itu username akun lu sendiri."
-        )
+        safeElement("small", "search-empty", "Itu akun lu sendiri.")
       );
 
       return;
@@ -1832,11 +2459,7 @@ async function searchUsers() {
       userSnap.data().status !== "active"
     ) {
       results.append(
-        safeElement(
-          "small",
-          "search-empty",
-          "Pengguna tidak tersedia."
-        )
+        safeElement("small", "search-empty", "Pengguna tidak tersedia.")
       );
 
       return;
@@ -1847,31 +2470,20 @@ async function searchUsers() {
     const row = safeElement("div", "user-item");
     const avatar = safeElement("div", "avatar");
 
-    renderAvatarInto(
-      avatar,
-      user.photoURL,
-      user.name
-    );
+    renderAvatarInto(avatar, user.photoURL, user.name);
 
     const details = safeElement("div");
 
     details.append(
-      createNameElement(
-        user.name || "Pengguna",
-        user.verified === true
-      ),
-      safeElement(
-        "small",
-        "",
-        `@${user.username || value}`
-      )
+      createNameElement(user.name, user.verified === true),
+      safeElement("small", "", `@${user.username || username}`)
     );
 
     row.append(avatar, details);
-    row.onclick = () => openPrivateChat({
-      ...user,
-      uid
-    });
+
+    row.onclick = () => {
+      openPrivateChat({ ...user, uid });
+    };
 
     results.append(row);
   } catch (error) {
@@ -1896,50 +2508,34 @@ function createStatusModal() {
   modal.hidden = true;
 
   const card = safeElement("div", "zora-modal-card");
-  const heading = safeElement("div", "zora-modal-heading");
-  const headingText = safeElement("div");
 
-  headingText.append(
+  const heading = safeElement("div", "zora-modal-heading");
+  const title = safeElement("div");
+
+  title.append(
     safeElement("small", "", "MOMENTS"),
     safeElement("h2", "", "Buat Status")
   );
 
-  const close = safeElement(
-    "button",
-    "zora-modal-close",
-    "×"
-  );
+  const close = safeElement("button", "zora-modal-close", "×");
 
   close.type = "button";
   close.onclick = () => setHidden("statusModal", true);
 
-  heading.append(headingText, close);
+  heading.append(title, close);
 
   const textarea = safeElement("textarea");
   textarea.id = "statusInput";
   textarea.maxLength = 500;
   textarea.placeholder = "Apa yang sedang kamu pikirkan?";
 
-  const actions = safeElement(
-    "div",
-    "zora-modal-actions"
-  );
+  const actions = safeElement("div", "zora-modal-actions");
 
-  const cancel = safeElement(
-    "button",
-    "secondary-btn",
-    "Batal"
-  );
-
+  const cancel = safeElement("button", "secondary-btn", "Batal");
   cancel.type = "button";
   cancel.onclick = () => setHidden("statusModal", true);
 
-  const publish = safeElement(
-    "button",
-    "primary-btn",
-    "Bagikan Status"
-  );
-
+  const publish = safeElement("button", "primary-btn", "Bagikan Status");
   publish.type = "button";
   publish.id = "publishStatus";
   publish.onclick = publishStatus;
@@ -1948,11 +2544,11 @@ function createStatusModal() {
   card.append(heading, textarea, actions);
   modal.append(card);
 
-  modal.addEventListener("click", event => {
+  modal.onclick = event => {
     if (event.target === modal) {
       setHidden("statusModal", true);
     }
-  });
+  };
 
   document.body.append(modal);
 }
@@ -1961,7 +2557,6 @@ function openStatusModal() {
   createStatusModal();
 
   $("statusInput").value = "";
-
   setHidden("statusModal", false);
 
   setTimeout(() => $("statusInput")?.focus(), 100);
@@ -2027,32 +2622,17 @@ function listenStatuses() {
           status.name
         );
 
-        const details = safeElement(
-          "div",
-          "status-details"
-        );
+        const details = safeElement("div", "status-details");
 
         details.append(
-          safeElement(
-            "strong",
-            "",
-            status.name || "Pengguna"
-          ),
-          safeElement(
-            "small",
-            "",
-            status.text || ""
-          )
+          safeElement("strong", "", status.name || "Pengguna"),
+          safeElement("small", "", status.text || "")
         );
 
         row.append(avatar, details);
 
         if (isMine) {
-          const del = safeElement(
-            "button",
-            "secondary-btn",
-            "Hapus"
-          );
+          const del = safeElement("button", "secondary-btn", "Hapus");
 
           del.type = "button";
 
@@ -2060,7 +2640,7 @@ function listenStatuses() {
             event.stopPropagation();
 
             const confirmed = await zoraConfirm(
-              "Status ini akan dihapus.",
+              "Hapus status ini?",
               {
                 title: "Hapus status",
                 confirmText: "Hapus",
@@ -2071,10 +2651,7 @@ function listenStatuses() {
             if (!confirmed) return;
 
             try {
-              await deleteDoc(
-                doc(db, "statuses", item.id)
-              );
-
+              await deleteDoc(doc(db, "statuses", item.id));
               toast("Status dihapus.");
             } catch (error) {
               toast(errorMessage(error));
@@ -2095,273 +2672,6 @@ function listenStatuses() {
 }
 
 // ======================================================
-// GROUPS
-// ======================================================
-
-on("createGroupBtn", "click", async () => {
-  const name = await zoraPrompt(
-    "Buat grup",
-    "Masukkan nama grup baru.",
-    "Nama grup"
-  );
-
-  if (!name) return;
-
-  try {
-    const group = await addDoc(
-      collection(db, "groups"),
-      {
-        name: name.trim(),
-        owner: currentUser.uid,
-        members: [currentUser.uid],
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }
-    );
-
-    toast("Grup berhasil dibuat.");
-    openGroup(group.id, name.trim());
-  } catch (error) {
-    toast(errorMessage(error));
-  }
-});
-
-function listenGroups() {
-  const q = query(
-    collection(db, "groups"),
-    where("members", "array-contains", currentUser.uid)
-  );
-
-  const unsubscribe = onSnapshot(
-    q,
-    snap => {
-      const list = $("groupList");
-      if (!list) return;
-
-      list.replaceChildren();
-
-      snap.forEach(item => {
-        const group = item.data();
-        const row = safeElement("div", "chat-item");
-
-        row.append(
-          safeElement("div", "avatar", "G"),
-          safeElement(
-            "strong",
-            "",
-            group.name || "Grup"
-          )
-        );
-
-        row.onclick = () => {
-          openGroup(item.id, group.name);
-        };
-
-        list.append(row);
-      });
-    },
-    error => toast(errorMessage(error))
-  );
-
-  unsubscribers.push(unsubscribe);
-}
-
-function openGroup(id, name) {
-  activeChat = { id, name };
-
-  activeChatType = "group";
-
-  setText("sendBtn", "Kirim");
-
-  showConversation(name, false);
-
-  listenMessages("groups", id);
-}
-
-// ======================================================
-// CHANNELS
-// ======================================================
-
-on("createChannelBtn", "click", async () => {
-  const name = await zoraPrompt(
-    "Buat saluran",
-    "Masukkan nama saluran.",
-    "Nama saluran"
-  );
-
-  if (!name) return;
-
-  const description = await zoraPrompt(
-    "Deskripsi saluran",
-    "Tambahkan deskripsi saluran (opsional).",
-    "Deskripsi"
-  );
-
-  try {
-    const channel = await addDoc(
-      collection(db, "channels"),
-      {
-        name: name.trim(),
-        description: description || "",
-        owner: currentUser.uid,
-        followers: [currentUser.uid],
-        createdAt: serverTimestamp()
-      }
-    );
-
-    toast("Saluran berhasil dibuat.");
-
-    openChannel(
-      channel.id,
-      name.trim(),
-      currentUser.uid
-    );
-  } catch (error) {
-    toast(errorMessage(error));
-  }
-});
-
-function listenChannels() {
-  const q = query(
-    collection(db, "channels"),
-    orderBy("createdAt", "desc"),
-    limit(100)
-  );
-
-  const unsubscribe = onSnapshot(
-    q,
-    snap => {
-      const list = $("channelList");
-      if (!list) return;
-
-      list.replaceChildren();
-
-      snap.forEach(item => {
-        const channel = item.data();
-        const row = safeElement("div", "chat-item");
-
-        row.append(
-          safeElement("div", "avatar", "S"),
-          safeElement(
-            "div",
-            "",
-            channel.name || "Saluran"
-          )
-        );
-
-        row.onclick = () => {
-          openChannel(
-            item.id,
-            channel.name,
-            channel.owner
-          );
-        };
-
-        list.append(row);
-      });
-    },
-    error => toast(errorMessage(error))
-  );
-
-  unsubscribers.push(unsubscribe);
-}
-
-function openChannel(id, name, owner) {
-  activeChat = { id, name, owner };
-
-  activeChatType = "channel";
-
-  showConversation(name, false);
-
-  setText("sendBtn", "Posting");
-
-  stopMessageListener();
-
-  const q = query(
-    collection(db, "channels", id, "posts"),
-    orderBy("createdAt", "asc"),
-    limit(100)
-  );
-
-  messageUnsubscribe = onSnapshot(
-    q,
-    snap => {
-      const container = $("messages");
-      if (!container) return;
-
-      container.replaceChildren();
-
-      snap.forEach(item => {
-        const post = item.data();
-        const bubble = safeElement("div", "bubble");
-
-        bubble.append(
-          safeElement(
-            "div",
-            "message-body",
-            post.text || ""
-          ),
-          safeElement(
-            "small",
-            "",
-            post.authorName || "Pengguna"
-          )
-        );
-
-        if (
-          post.uid === currentUser.uid ||
-          isAdmin()
-        ) {
-          const del = safeElement(
-            "button",
-            "message-delete",
-            "Hapus"
-          );
-
-          del.type = "button";
-
-          del.onclick = async () => {
-            const confirmed = await zoraConfirm(
-              "Postingan ini akan dihapus.",
-              {
-                title: "Hapus postingan",
-                confirmText: "Hapus",
-                danger: true
-              }
-            );
-
-            if (!confirmed) return;
-
-            try {
-              await deleteDoc(
-                doc(
-                  db,
-                  "channels",
-                  id,
-                  "posts",
-                  item.id
-                )
-              );
-
-              toast("Postingan dihapus.");
-            } catch (error) {
-              toast(errorMessage(error));
-            }
-          };
-
-          bubble.append(del);
-        }
-
-        container.append(bubble);
-      });
-
-      container.scrollTop = container.scrollHeight;
-    },
-    error => toast(errorMessage(error))
-  );
-}
-
-// ======================================================
 // PROFILE
 // ======================================================
 
@@ -2377,8 +2687,7 @@ function openProfile() {
   }
 
   if (exists("profileUsername")) {
-    $("profileUsername").value =
-      currentProfile.username || "";
+    $("profileUsername").value = currentProfile.username || "";
   }
 
   createProfilePhotoControls();
@@ -2415,17 +2724,12 @@ on("saveProfile", "click", async () => {
   }
 
   if (!validUsername(newUsername)) {
-    toast(
-      "Username harus 3–20 karakter, huruf kecil, angka, atau underscore."
-    );
-
+    toast("Format username tidak valid.");
     return;
   }
 
   try {
-    if (
-      newUsername !== normalizeUsername(oldUsername)
-    ) {
+    if (newUsername !== normalizeUsername(oldUsername)) {
       await claimUsername(
         newUsername,
         currentUser.uid,
@@ -2433,18 +2737,14 @@ on("saveProfile", "click", async () => {
       );
     }
 
-    await updateDoc(
-      doc(db, "users", currentUser.uid),
-      {
-        name,
-        bio,
-        username: newUsername,
-        usernameLower: newUsername
-      }
-    );
+    await updateDoc(doc(db, "users", currentUser.uid), {
+      name,
+      bio,
+      username: newUsername,
+      usernameLower: newUsername
+    });
 
     setHidden("profileModal", true);
-
     toast("Profil berhasil diperbarui.");
   } catch (error) {
     toast(errorMessage(error));
@@ -2514,11 +2814,9 @@ on("findAdminUser", "click", async () => {
   const uid = $("adminSearch")?.value.trim();
   const result = $("adminUserResult");
 
-  if (!result) return;
+  if (!result || !uid) return;
 
   result.replaceChildren();
-
-  if (!uid) return;
 
   try {
     const snap = await getDoc(doc(db, "users", uid));
@@ -2547,11 +2845,7 @@ on("findAdminUser", "click", async () => {
     ];
 
     actions.forEach(([label, changes]) => {
-      const button = safeElement(
-        "button",
-        "secondary-btn",
-        label
-      );
+      const button = safeElement("button", "secondary-btn", label);
 
       button.type = "button";
 
@@ -2573,14 +2867,11 @@ on("findAdminUser", "click", async () => {
         if (!confirmed) return;
 
         try {
-          await updateDoc(
-            doc(db, "users", uid),
-            {
-              ...changes,
-              moderatedAt: serverTimestamp(),
-              moderatedBy: currentUser.uid
-            }
-          );
+          await updateDoc(doc(db, "users", uid), {
+            ...changes,
+            moderatedAt: serverTimestamp(),
+            moderatedBy: currentUser.uid
+          });
 
           toast("Perubahan akun berhasil disimpan.");
         } catch (error) {
@@ -2627,12 +2918,7 @@ async function loadAppeals() {
         `${appeal.email || appeal.uid}: ${appeal.text || ""}`
       );
 
-      const approve = safeElement(
-        "button",
-        "primary-btn",
-        "Terima"
-      );
-
+      const approve = safeElement("button", "primary-btn", "Terima");
       approve.type = "button";
 
       approve.onclick = async () => {
@@ -2647,23 +2933,17 @@ async function loadAppeals() {
         if (!confirmed) return;
 
         try {
-          await updateDoc(
-            doc(db, "users", appeal.uid),
-            {
-              status: "recovered",
-              moderatedAt: serverTimestamp(),
-              moderatedBy: currentUser.uid
-            }
-          );
+          await updateDoc(doc(db, "users", appeal.uid), {
+            status: "recovered",
+            moderatedAt: serverTimestamp(),
+            moderatedBy: currentUser.uid
+          });
 
-          await updateDoc(
-            doc(db, "appeals", item.id),
-            {
-              status: "approved",
-              reviewedAt: serverTimestamp(),
-              reviewedBy: currentUser.uid
-            }
-          );
+          await updateDoc(doc(db, "appeals", item.id), {
+            status: "approved",
+            reviewedAt: serverTimestamp(),
+            reviewedBy: currentUser.uid
+          });
 
           toast("Banding diterima.");
           loadAppeals();
@@ -2672,12 +2952,7 @@ async function loadAppeals() {
         }
       };
 
-      const reject = safeElement(
-        "button",
-        "secondary-btn",
-        "Tolak"
-      );
-
+      const reject = safeElement("button", "secondary-btn", "Tolak");
       reject.type = "button";
 
       reject.onclick = async () => {
@@ -2693,14 +2968,11 @@ async function loadAppeals() {
         if (!confirmed) return;
 
         try {
-          await updateDoc(
-            doc(db, "appeals", item.id),
-            {
-              status: "rejected",
-              reviewedAt: serverTimestamp(),
-              reviewedBy: currentUser.uid
-            }
-          );
+          await updateDoc(doc(db, "appeals", item.id), {
+            status: "rejected",
+            reviewedAt: serverTimestamp(),
+            reviewedBy: currentUser.uid
+          });
 
           toast("Banding ditolak.");
           loadAppeals();
@@ -2718,7 +2990,7 @@ async function loadAppeals() {
 }
 
 // ======================================================
-// GLOBAL MENU CLOSE
+// GLOBAL EVENTS
 // ======================================================
 
 document.addEventListener("click", event => {
@@ -2732,8 +3004,12 @@ document.addEventListener("click", event => {
   }
 });
 
+window.addEventListener("pagehide", () => {
+  updateTyping(false);
+});
+
 // ======================================================
 // START
 // ======================================================
 
-console.log("ZORAAPP — app.js berhasil dimuat.");
+console.log("ZORAAPP — app.js loaded.");
