@@ -1,0 +1,21 @@
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function active() {
+      return request.auth != null &&
+        firestore.get(
+          /databases/(default)/documents/users/$(request.auth.uid)
+        ).data.status == "active";
+    }
+
+    match /chat-media/{uid}/{fileName} {
+      allow read: if active();
+      allow write: if active()
+        && request.auth.uid == uid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}
