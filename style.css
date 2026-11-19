@@ -2170,3 +2170,103 @@ button {
     font-size: 10px;
   }
 }
+
+
+.channel-item-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+}
+
+.channel-item-details strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-followers {
+  display: block;
+  font-size: 11px;
+  opacity: .75;
+  line-height: 1.4;
+}
+
+.channel-description {
+  display: block;
+  max-width: 100%;
+  font-size: 11px;
+  opacity: .65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-follow-btn {
+  flex-shrink: 0;
+  width: auto;
+  min-width: 65px;
+  padding: 9px 12px;
+  font-size: 11px;
+}
+
+.conversation-header {
+  min-width: 0;
+}
+
+.conversation-user {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.conversation-user strong,
+.conversation-user small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-presence {
+  flex-shrink: 0;
+  font-size: 10px;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-presence.is-online {
+  color: #20bd83;
+}
+
+.chat-item-details {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.chat-item-details strong,
+.chat-item-details small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.message-ticks {
+  flex-shrink: 0;
+  letter-spacing: normal;
+}
