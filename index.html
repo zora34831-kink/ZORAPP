@@ -7,56 +7,202 @@
 <meta name="theme-color" content="#eaf0f8">
 <title>ZORAAPP</title>
 <link rel="stylesheet" href="style.css">
+
+<style>
+[hidden]{display:none!important}
+.auth-screen{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:22px;
+}
+.auth-card{
+  width:100%;
+  max-width:410px;
+  padding:30px;
+  border-radius:26px;
+}
+.auth-card h1{text-align:center;margin:12px 0 5px}
+.auth-card>p{text-align:center;opacity:.65;margin-bottom:25px}
+.logo{
+  width:65px;height:65px;
+  margin:auto;
+  display:grid;place-items:center;
+  border-radius:20px;
+  font-size:32px;font-weight:800;
+}
+.auth-card input{
+  width:100%;
+  box-sizing:border-box;
+  margin:7px 0;
+  padding:14px;
+  border-radius:13px;
+}
+.auth-card button{
+  width:100%;
+  margin-top:10px;
+  padding:14px;
+  border-radius:13px;
+  cursor:pointer;
+}
+.auth-card button:disabled{opacity:.5;cursor:wait}
+.auth-switch{
+  text-align:center;
+  margin-top:20px;
+  font-size:14px;
+}
+.auth-switch button{
+  width:auto;
+  padding:4px;
+  border:0;
+  background:transparent;
+  font-weight:700;
+}
+.auth-error{
+  color:#d33;
+  font-size:13px;
+  margin:10px 0;
+  text-align:center;
+}
+.auth-heading{
+  font-size:23px;
+  font-weight:750;
+}
+.auth-subtitle{
+  font-size:13px;
+  opacity:.65;
+}
+</style>
 </head>
+
 <body>
 
+<!-- AUTHENTICATION -->
 <div id="authScreen" class="auth-screen">
   <div class="auth-card glass">
+
     <div class="logo">Z</div>
+
     <h1>ZORAAPP</h1>
     <p>Connect with everyone.</p>
-    <div id="authError" class="error"></div>
-    <input id="authName" placeholder="Nama pengguna">
-    <input id="authEmail" type="email" placeholder="Email">
-    <input id="authPassword" type="password" placeholder="Password">
-    <button id="loginBtn">Masuk</button>
-    <button id="registerBtn" class="secondary">Buat akun</button>
+
+    <!-- LOGIN -->
+    <section id="loginMode">
+      <div class="auth-heading">Selamat datang</div>
+      <div class="auth-subtitle">Masuk ke akun ZORAAPP kamu.</div>
+
+      <div id="authError" class="error auth-error"></div>
+
+      <input
+        id="authEmail"
+        type="email"
+        placeholder="Alamat email"
+        autocomplete="email"
+      >
+
+      <input
+        id="authPassword"
+        type="password"
+        placeholder="Password"
+        autocomplete="current-password"
+      >
+
+      <button id="loginBtn" type="button">Masuk</button>
+
+      <div class="auth-switch">
+        Belum punya akun?
+        <button id="showRegister" type="button">Buat akun</button>
+      </div>
+    </section>
+
+    <!-- REGISTER -->
+    <section id="registerMode" hidden>
+      <div class="auth-heading">Buat akun baru</div>
+      <div class="auth-subtitle">Bergabung dengan ZORAAPP.</div>
+
+      <div id="registerError" class="error auth-error"></div>
+
+      <input
+        id="authName"
+        type="text"
+        placeholder="Nama pengguna"
+        autocomplete="name"
+        maxlength="40"
+      >
+
+      <input
+        id="registerEmail"
+        type="email"
+        placeholder="Alamat email"
+        autocomplete="email"
+      >
+
+      <input
+        id="registerPassword"
+        type="password"
+        placeholder="Password minimal 8 karakter"
+        autocomplete="new-password"
+      >
+
+      <button id="registerBtn" type="button">Daftar sekarang</button>
+
+      <div class="auth-switch">
+        Sudah punya akun?
+        <button id="showLogin" type="button">Masuk</button>
+      </div>
+    </section>
+
   </div>
 </div>
 
+<!-- AKUN DITAHAN -->
 <div id="holdScreen" class="special-screen" hidden>
   <div class="special-card glass">
     <div class="special-icon">!</div>
     <h1>AKUN ANDA KAMI TAHAN!</h1>
     <p>AJUKAN BANDING MELALUI TOMBOL DIBAWAH</p>
-    <textarea id="appealText" placeholder="Tuliskan alasan banding..."></textarea>
-    <button id="appealBtn">BANDING</button>
+
+    <textarea
+      id="appealText"
+      placeholder="Tuliskan alasan banding..."
+    ></textarea>
+
+    <button id="appealBtn" type="button">BANDING</button>
     <p id="appealMessage"></p>
-    <button id="logoutHold" class="secondary">Keluar</button>
+    <button id="logoutHold" class="secondary" type="button">Keluar</button>
   </div>
 </div>
 
+<!-- AKUN PERMANEN -->
 <div id="permanentScreen" class="special-screen" hidden>
   <div class="special-card glass">
     <div class="special-icon">!</div>
     <h1>AKUN ANDA DIPERMANENKAN!</h1>
     <p>Akun ini telah dinonaktifkan secara permanen.</p>
-    <button id="newAccountBtn">DAFTARKAN AKUN BARU</button>
+    <button id="newAccountBtn" type="button">
+      DAFTARKAN AKUN BARU
+    </button>
   </div>
 </div>
 
+<!-- APLIKASI UTAMA -->
 <div id="appScreen" hidden>
+
   <header class="topbar glass">
     <div class="brand"><span>Z</span> ZORAAPP</div>
+
     <div class="header-actions">
-      <button id="themeBtn" title="Tema">Tema</button>
-      <button id="profileBtn">Profil</button>
-      <button id="logoutBtn">Keluar</button>
+      <button id="themeBtn" type="button">Tema</button>
+      <button id="profileBtn" type="button">Profil</button>
+      <button id="logoutBtn" type="button">Keluar</button>
     </div>
   </header>
 
   <main class="layout">
+
     <aside class="sidebar glass">
+
       <div class="profile-mini">
         <div class="avatar" id="myAvatar">Z</div>
         <div>
@@ -68,6 +214,7 @@
       <div class="search">
         <input id="searchUser" placeholder="Cari pengguna...">
       </div>
+
       <div id="searchResults"></div>
 
       <div class="section-title">PESAN</div>
@@ -77,11 +224,13 @@
       <div id="statusList"></div>
 
       <div id="adminLink" hidden>
-        <button id="openAdmin">PANEL ADMIN</button>
+        <button id="openAdmin" type="button">PANEL ADMIN</button>
       </div>
+
     </aside>
 
     <section class="chat-area glass">
+
       <div id="emptyChat" class="empty">
         <div class="empty-logo">Z</div>
         <h2>Selamat datang di ZORAAPP</h2>
@@ -89,6 +238,7 @@
       </div>
 
       <div id="chatPanel" hidden>
+
         <div class="chat-header">
           <div class="avatar" id="chatAvatar">U</div>
           <div>
@@ -96,47 +246,143 @@
             <small id="chatVerified"></small>
           </div>
         </div>
+
         <div id="messages" class="messages"></div>
+
         <div class="composer">
           <label class="attach">
             +
-            <input id="imageInput" type="file" accept="image/*" hidden>
+            <input
+              id="imageInput"
+              type="file"
+              accept="image/*"
+              hidden
+            >
           </label>
+
           <input id="messageInput" placeholder="Tulis pesan...">
-          <button id="sendBtn">Kirim</button>
+          <button id="sendBtn" type="button">Kirim</button>
         </div>
+
       </div>
     </section>
   </main>
 </div>
 
+<!-- ADMIN -->
 <div id="adminScreen" class="modal" hidden>
   <div class="admin-card glass">
+
     <div class="admin-head">
       <h2>ADMIN CONTROL</h2>
-      <button id="closeAdmin">Tutup</button>
+      <button id="closeAdmin" type="button">Tutup</button>
     </div>
 
     <h3>Kelola pengguna</h3>
     <input id="adminSearch" placeholder="Cari UID pengguna">
-    <button id="findAdminUser">Cari</button>
+    <button id="findAdminUser" type="button">Cari</button>
     <div id="adminUserResult"></div>
 
     <h3>Permohonan banding</h3>
     <div id="appealList"></div>
+
   </div>
 </div>
 
+<!-- PROFIL -->
 <div id="profileModal" class="modal" hidden>
   <div class="admin-card glass">
+
     <h2>Profil saya</h2>
+
     <input id="profileName" placeholder="Nama">
     <input id="profileBio" placeholder="Bio">
-    <button id="saveProfile">Simpan profil</button>
-    <button id="closeProfile" class="secondary">Tutup</button>
+
+    <button id="saveProfile" type="button">Simpan profil</button>
+    <button id="closeProfile" class="secondary" type="button">Tutup</button>
+
   </div>
 </div>
 
+<!-- MODE AUTH -->
+<script>
+const loginMode = document.getElementById("loginMode");
+const registerMode = document.getElementById("registerMode");
+
+document.getElementById("showRegister").onclick = () => {
+  loginMode.hidden = true;
+  registerMode.hidden = false;
+
+  document.getElementById("authError").textContent = "";
+  document.getElementById("registerError").textContent = "";
+};
+
+document.getElementById("showLogin").onclick = () => {
+  registerMode.hidden = true;
+  loginMode.hidden = false;
+
+  document.getElementById("authError").textContent = "";
+  document.getElementById("registerError").textContent = "";
+};
+</script>
+
 <script type="module" src="app.js"></script>
+
+<!-- SAMAKAN INPUT REGISTER DENGAN APP.JS -->
+<script type="module">
+import { auth, db } from "./firebase.js";
+
+import {
+  createUserWithEmailAndPassword
+} from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
+
+import {
+  doc, setDoc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
+
+const $ = id => document.getElementById(id);
+
+$("registerBtn").onclick = async () => {
+  const name = $("authName").value.trim();
+  const email = $("registerEmail").value.trim();
+  const password = $("registerPassword").value;
+
+  $("registerError").textContent = "";
+
+  if (!name || !email || !password) {
+    $("registerError").textContent = "Semua kolom wajib diisi.";
+    return;
+  }
+
+  if (password.length < 8) {
+    $("registerError").textContent = "Password minimal 8 karakter.";
+    return;
+  }
+
+  $("registerBtn").disabled = true;
+
+  try {
+    const credential = await createUserWithEmailAndPassword(
+      auth, email, password
+    );
+
+    await setDoc(doc(db, "users", credential.user.uid), {
+      uid: credential.user.uid,
+      name,
+      email,
+      bio: "",
+      verified: false,
+      status: "active",
+      createdAt: serverTimestamp()
+    });
+
+  } catch (error) {
+    $("registerError").textContent = error.message;
+  } finally {
+    $("registerBtn").disabled = false;
+  }
+};
+</script>
+
 </body>
 </html>
