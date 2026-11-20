@@ -39,7 +39,7 @@ import {
 
 const ADMIN_UID = "PbeBf6CtGLVWvX2RqnuvXBWyePG2";
 
-const $ = (id) => document.getElementById(id);
+const $ = id => document.getElementById(id);
 
 let currentUser = null;
 let currentProfile = null;
@@ -53,6 +53,7 @@ let typingUnsubscribe = null;
 let presenceUnsubscribe = null;
 
 let currentTheme = localStorage.getItem("zora-theme") || "dark";
+let loginProcessing = false;
 
 const THEMES = ["neon", "dark", "light", "purple"];
 
@@ -72,12 +73,16 @@ function safeText(value = "") {
 
 function toast(message, duration = 2800) {
   const node = el("toast");
-  if (!node) return;
+  if (!node) {
+    console.log("[ZORAAPP]", message);
+    return;
+  }
 
   node.textContent = message;
   node.classList.add("show");
 
   clearTimeout(node._timer);
+
   node._timer = setTimeout(() => {
     node.classList.remove("show");
   }, duration);
@@ -104,7 +109,10 @@ function formatTime(timestamp) {
 function formatLastSeen(timestamp) {
   if (!timestamp) return "Terakhir dilihat tidak diketahui";
 
-  const date = new Date(timestamp);
+  const date = timestamp.toDate
+    ? timestamp.toDate()
+    : new Date(timestamp);
+
   const now = new Date();
 
   if (date.toDateString() === now.toDateString()) {
@@ -130,7 +138,11 @@ function isAdmin() {
 
 function clearListeners() {
   unsubscribers.forEach(fn => {
-    try { fn(); } catch {}
+    try {
+      fn();
+    } catch (error) {
+      console.warn("Listener cleanup:", error);
+    }
   });
 
   unsubscribers = [];
@@ -144,10 +156,14 @@ function clearListeners() {
     presenceUnsubscribe();
     presenceUnsubscribe = null;
   }
+
+  clearTimeout(typingTimeout);
 }
 
 function listen(unsubscribe) {
-  unsubscribers.push(unsubscribe);
+  if (typeof unsubscribe === "function") {
+    unsubscribers.push(unsubscribe);
+  }
 }
 
 
@@ -190,7 +206,9 @@ async function loadProfile(uid) {
   const snap = await getDoc(doc(db, "users", uid));
 
   if (!snap.exists()) {
-    throw new Error("Profil pengguna tidak ditemukan.");
+    throw new Error(
+      "Profil pengguna tidak ditemukan di Firestore. Periksa dokumen users/" + uid
+    );
   }
 
   currentProfile = {
@@ -211,7 +229,30 @@ function showApp() {
   el("appScreen")?.classList.remove("hidden");
 }
 
-el("loginBtn")?.addEventListener("click", async () => {
+function getAuthErrorMessage(error) {
+  const code = error?.code || "";
+
+  const messages = {
+    "auth/invalid-email": "Format email tidak valid.",
+    "auth/user-not-found": "Akun dengan email tersebut tidak ditemukan.",
+    "auth/wrong-password": "Password yang lu masukkan salah.",
+    "auth/invalid-credential": "Email atau password salah.",
+    "auth/invalid-login-credentials": "Email atau password salah.",
+    "auth/user-disabled": "Akun ini sedang dinonaktifkan.",
+    "auth/too-many-requests": "Terlalu banyak percobaan. Coba lagi nanti.",
+    "auth/network-request-failed": "Koneksi internet bermasalah.",
+    "auth/operation-not-allowed": "Login email/password belum diaktifkan di Firebase.",
+    "auth/email-already-in-use": "Email sudah digunakan.",
+    "auth/weak-password": "Password terlalu lemah.",
+    "auth/weak-password-too-short": "Password terlalu pendek."
+  };
+
+  return messages[code] || error?.message || "Terjadi kesalahan saat login.";
+}
+
+async function handleLogin() {
+  if (loginProcessing) return;
+
   const email = el("authEmail")?.value.trim();
   const password = el("authPassword")?.value;
 
@@ -220,18 +261,55 @@ el("loginBtn")?.addEventListener("click", async () => {
     return;
   }
 
-  try {
-    setError("authError", "");
-    await signInWithEmailAndPassword(auth, email, password);
-  } catch (error) {
-    setError("authError", error.message);
+  const button = el("loginBtn");
+  const originalText = button?.textContent || "MASUK KE AKUN";
+
+  loginProcessing = true;
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "MEMERIKSA AKUN...";
+    button.classList.add("loading");
   }
-});
+
+  setError("authError", "");
+
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+    setError("authError", "");
+  } catch (error) {
+    console.error("ZORAAPP login error:", error);
+    setError("authError", getAuthErrorMessage(error));
+  } finally {
+    loginProcessing = false;
+
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.classList.remove("loading");
+    }
+  }
+}
+
+/*
+  Event delegation dipasang pada document.
+  Ini membuat tombol login tetap terdeteksi jika elemen tombol
+  dibuat ulang oleh bagian lain dari halaman.
+*/
+document.addEventListener("click", event => {
+  const button = event.target.closest("#loginBtn");
+
+  if (!button) return;
+
+  event.preventDefault();
+  handleLogin();
+}, true);
 
 el("registerBtn")?.addEventListener("click", async () => {
   const name = el("authName")?.value.trim();
   const email = el("registerEmail")?.value.trim();
   const password = el("registerPassword")?.value;
+
   const username = el("registerUsername")?.value
     .trim()
     .toLowerCase()
@@ -250,6 +328,12 @@ el("registerBtn")?.addEventListener("click", async () => {
   if (password.length < 6) {
     setError("registerError", "Password minimal 6 karakter.");
     return;
+  }
+
+  const button = el("registerBtn");
+
+  if (button) {
+    button.disabled = true;
   }
 
   try {
@@ -292,7 +376,10 @@ el("registerBtn")?.addEventListener("click", async () => {
 
     toast("Akun berhasil dibuat.");
   } catch (error) {
-    setError("registerError", error.message);
+    console.error("Register error:", error);
+    setError("registerError", getAuthErrorMessage(error));
+  } finally {
+    if (button) button.disabled = false;
   }
 });
 
@@ -308,7 +395,7 @@ el("forgotPassword")?.addEventListener("click", async () => {
     await sendPasswordResetEmail(auth, email);
     toast("Link reset password telah dikirim.");
   } catch (error) {
-    toast(error.message);
+    toast(getAuthErrorMessage(error));
   }
 });
 
@@ -409,6 +496,7 @@ el("saveProfile")?.addEventListener("click", async () => {
 
     renderProfile();
     el("profileModal")?.classList.add("hidden");
+
     toast("Profil berhasil diperbarui.");
   } catch (error) {
     toast(error.message);
@@ -473,7 +561,7 @@ async function setupPresence() {
   });
 
   document.addEventListener("visibilitychange", async () => {
-    if (document.visibilityState === "visible") {
+    if (document.visibilityState === "visible" && currentUser) {
       await set(statusRef, {
         state: "online",
         lastChanged: rtdbTimestamp()
@@ -525,15 +613,23 @@ function openPage(page) {
   document.querySelectorAll("[data-page]").forEach(button => {
     button.classList.toggle(
       "active",
-      button.dataset.page === page
+      button.dataset.page === page ||
+      button.dataset.page === `${page}Page`
     );
   });
 
   document.querySelectorAll(".page").forEach(section => {
-    section.classList.toggle(
-      "active",
-      section.id === `${page}Page`
-    );
+    const targetId = page.endsWith("Page")
+      ? page
+      : `${page}Page`;
+
+    section.classList.toggle("active", section.id === targetId);
+
+    if (section.id === targetId) {
+      section.removeAttribute("hidden");
+    } else {
+      section.setAttribute("hidden", "");
+    }
   });
 
   document.body.classList.remove("chat-open");
@@ -589,6 +685,11 @@ async function openPrivateChat(otherUid, otherProfile = null) {
     } else if (!chatSnap.data().members?.includes(currentUser.uid)) {
       toast("Akses chat ditolak.");
       return;
+    }
+
+    if (presenceUnsubscribe) {
+      presenceUnsubscribe();
+      presenceUnsubscribe = null;
     }
 
     activeChat = chatId;
@@ -762,7 +863,6 @@ function listenMessages(id, collectionName) {
 
     snapshot.forEach(messageDoc => {
       const message = messageDoc.data();
-
       const own = message.senderId === currentUser.uid;
 
       const item = document.createElement("div");
@@ -811,6 +911,11 @@ async function sendMessage() {
   const text = input?.value.trim();
 
   if (!text || !activeChat || !activeChatType) return;
+
+  if (activeChatType === "channel") {
+    toast("Saluran hanya menerima postingan dari admin.");
+    return;
+  }
 
   const collectionName = activeChatType === "group"
     ? "groups"
@@ -876,11 +981,12 @@ function typingPath(type, id, uid) {
 
 function startTyping() {
   if (!activeChat || !activeChatType || !currentUser) return;
+  if (activeChatType === "channel") return;
 
   set(
     dbRef(rtdb, typingPath(activeChatType, activeChat, currentUser.uid)),
     {
-      name: currentProfile.name,
+      name: currentProfile?.name || "Pengguna",
       typing: true
     }
   ).catch(() => {});
@@ -940,11 +1046,19 @@ async function openChannel(channelId) {
 
     const channel = channelSnap.data();
 
+    if (presenceUnsubscribe) {
+      presenceUnsubscribe();
+      presenceUnsubscribe = null;
+    }
+
+    if (typingUnsubscribe) {
+      typingUnsubscribe();
+      typingUnsubscribe = null;
+    }
+
     activeChannel = channelId;
     activeChat = channelId;
     activeChatType = "channel";
-
-    clearListeners();
 
     const panel = el("chatPanel");
     panel?.classList.remove("hidden");
@@ -959,12 +1073,19 @@ async function openChannel(channelId) {
     const isOwner = channel.owner === currentUser.uid;
     const isFollowing = followers.includes(currentUser.uid);
 
+    if (el("chatAvatar")) {
+      el("chatAvatar").innerHTML = avatarHTML({
+        name: channel.name || "Saluran"
+      });
+    }
+
     if (el("chatPresence")) {
       el("chatPresence").textContent =
         `${followers.length} pengikut`;
     }
 
     const composer = document.querySelector(".composer");
+
     if (composer) {
       composer.classList.toggle("hidden", !isOwner);
     }
@@ -994,7 +1115,9 @@ function renderChannelControls(channel, isOwner, isFollowing) {
     follow.className = "channel-follow-btn";
     follow.textContent = "Ikuti saluran";
 
-    follow.addEventListener("click", () => followChannel(activeChannel));
+    follow.addEventListener("click", () => {
+      followChannel(activeChannel);
+    });
 
     controls.appendChild(follow);
   }
@@ -1004,7 +1127,9 @@ function renderChannelControls(channel, isOwner, isFollowing) {
     unfollow.className = "secondary-btn";
     unfollow.textContent = "Berhenti mengikuti";
 
-    unfollow.addEventListener("click", () => unfollowChannel(activeChannel));
+    unfollow.addEventListener("click", () => {
+      unfollowChannel(activeChannel);
+    });
 
     controls.appendChild(unfollow);
   }
@@ -1039,7 +1164,11 @@ async function unfollowChannel(channelId) {
 function listenChannelPosts(channelId) {
   const postsRef = collection(db, "channels", channelId, "posts");
 
-  const q = query(postsRef, orderBy("createdAt", "asc"), limit(100));
+  const q = query(
+    postsRef,
+    orderBy("createdAt", "asc"),
+    limit(100)
+  );
 
   const unsubscribe = onSnapshot(q, snapshot => {
     const container = el("messages");
@@ -1126,6 +1255,7 @@ async function toggleChannelReaction(channelId, postId, reaction) {
 
 el("createChannelBtn")?.addEventListener("click", async () => {
   const name = prompt("Nama saluran:");
+
   if (!name?.trim()) return;
 
   const description = prompt("Deskripsi saluran:") || "";
@@ -1252,7 +1382,9 @@ el("searchUser")?.addEventListener("input", async event => {
     });
 
     if (!results.children.length) {
-      results.innerHTML = `<p class="search-empty">Pengguna tidak ditemukan.</p>`;
+      results.innerHTML = `
+        <p class="search-empty">Pengguna tidak ditemukan.</p>
+      `;
     }
   } catch (error) {
     toast(error.message);
@@ -1286,6 +1418,7 @@ function listenChats() {
       );
 
       if (!otherUid || rendered.has(otherUid)) continue;
+
       rendered.add(otherUid);
 
       const userSnap = await getDoc(doc(db, "users", otherUid));
@@ -1310,6 +1443,8 @@ function listenChats() {
 
       container.appendChild(item);
     }
+  }, error => {
+    toast("Gagal memuat daftar chat: " + error.message);
   });
 
   listen(unsubscribe);
@@ -1347,6 +1482,8 @@ function listenGroups() {
 
       container.appendChild(button);
     });
+  }, error => {
+    toast("Gagal memuat daftar grup: " + error.message);
   });
 
   listen(unsubscribe);
@@ -1381,6 +1518,9 @@ function listenChannels() {
 
         container.appendChild(button);
       });
+    },
+    error => {
+      toast("Gagal memuat saluran: " + error.message);
     }
   );
 
@@ -1456,6 +1596,8 @@ function listenStatuses() {
 
       container.appendChild(item);
     });
+  }, error => {
+    toast("Gagal memuat status: " + error.message);
   });
 
   listen(unsubscribe);
@@ -1530,6 +1672,11 @@ onAuthStateChanged(auth, async user => {
 
   if (!user) {
     showAuth();
+
+    el("holdScreen")?.classList.add("hidden");
+    el("recoveredScreen")?.classList.add("hidden");
+    el("permanentScreen")?.classList.add("hidden");
+
     return;
   }
 
@@ -1548,6 +1695,10 @@ onAuthStateChanged(auth, async user => {
       return;
     }
 
+    el("holdScreen")?.classList.add("hidden");
+    el("recoveredScreen")?.classList.add("hidden");
+    el("permanentScreen")?.classList.add("hidden");
+
     showApp();
     renderProfile();
 
@@ -1561,9 +1712,25 @@ onAuthStateChanged(auth, async user => {
     openPage("chats");
   } catch (error) {
     console.error("ZORAAPP initialization:", error);
-    toast("Gagal memuat akun: " + error.message);
+
+    showAuth();
+
+    setError(
+      "authError",
+      "Login berhasil, tetapi data akun gagal dimuat: " + error.message
+    );
   }
 });
 
 
+/* =====================================================
+   STARTUP CHECK
+===================================================== */
+
 console.log("ZORAAPP — app.js loaded.");
+
+if (!el("loginBtn")) {
+  console.error(
+    "ZORAAPP: tombol #loginBtn tidak ditemukan. Periksa ID tombol di index.html."
+  );
+}
