@@ -182,6 +182,19 @@ function formatDate(timestamp) {
   });
 }
 
+function isAdmin() {
+  return user?.uid === ADMIN_UID;
+}
+
+function logFirebaseError(label, error) {
+  console.error(label, {
+    code: error?.code,
+    message: error?.message,
+    uid: user?.uid,
+    profileStatus: profile?.status
+  });
+}
+
 function showPage(pageId) {
   currentPage = pageId;
 
@@ -251,17 +264,8 @@ function updateProfileUI() {
   }
 
   if ($("openAdmin")) {
-    $("openAdmin").hidden = user.uid !== ADMIN_UID;
+    $("openAdmin").hidden = !isAdmin();
   }
-}
-
-function logFirebaseError(label, error) {
-  console.error(label, {
-    code: error?.code,
-    message: error?.message,
-    uid: user?.uid,
-    profileStatus: profile?.status
-  });
 }
 
 // =====================================
@@ -315,13 +319,10 @@ async function createUserProfile(uid, data) {
   const username = normalizeUsername(data.username);
 
   if (!validUsername(username)) {
-    throw new Error(
-      "Username harus 3–20 karakter, huruf kecil, angka, atau garis bawah."
-    );
+    throw new Error("Username tidak valid.");
   }
 
-  await reserveUsername(username, uid);
-
+  // Buat profil terlebih dahulu agar activeUser dapat terpenuhi.
   await setDoc(doc(db, "users", uid), {
     uid,
     name: String(data.name || "").trim(),
@@ -334,6 +335,13 @@ async function createUserProfile(uid, data) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
+
+  try {
+    await reserveUsername(username, uid);
+  } catch (error) {
+    await deleteDoc(doc(db, "users", uid)).catch(() => {});
+    throw error;
+  }
 }
 
 // =====================================
@@ -350,12 +358,10 @@ function authErrorMessage(error) {
     "auth/too-many-requests": "Terlalu banyak percobaan. Coba lagi nanti.",
     "auth/network-request-failed": "Koneksi internet bermasalah.",
     "auth/invalid-phone-number": "Nomor HP tidak valid.",
-    "auth/operation-not-allowed": "Metode login belum diaktifkan di Firebase."
+    "auth/operation-not-allowed": "Metode login belum diaktifkan."
   };
 
-  return messages[error?.code] ||
-    error?.message ||
-    "Terjadi kesalahan.";
+  return messages[error?.code] || error?.message || "Terjadi kesalahan.";
 }
 
 async function loginEmail() {
@@ -371,7 +377,6 @@ async function loginEmail() {
     }
 
     await signInWithEmailAndPassword(auth, email, password);
-
   } catch (error) {
     showError("authError", authErrorMessage(error));
   } finally {
@@ -385,9 +390,7 @@ async function registerEmail() {
 
   try {
     const name = $("authName").value.trim();
-    const username = normalizeUsername(
-      $("registerUsername").value
-    );
+    const username = normalizeUsername($("registerUsername").value);
     const email = $("registerEmail").value.trim();
     const password = $("registerPassword").value;
 
@@ -418,6 +421,7 @@ async function registerEmail() {
       username
     });
 
+    toast("Pendaftaran berhasil.");
   } catch (error) {
     logFirebaseError("REGISTER ERROR", error);
     showError("registerError", authErrorMessage(error));
@@ -430,10 +434,7 @@ async function forgotPassword() {
   const email = $("authEmail").value.trim();
 
   if (!email) {
-    showError(
-      "authError",
-      "Masukkan email terlebih dahulu."
-    );
+    showError("authError", "Masukkan email terlebih dahulu.");
     return;
   }
 
@@ -470,15 +471,10 @@ async function sendPhoneOTP() {
     const phone = $("phoneNumber").value.trim();
 
     if (!PHONE_PATTERN.test(phone)) {
-      throw new Error(
-        "Gunakan format nomor +628xxxxxxxxxx."
-      );
+      throw new Error("Gunakan format +628xxxxxxxxxx.");
     }
 
-    recaptcha = setupRecaptcha(
-      "recaptcha-container",
-      recaptcha
-    );
+    recaptcha = setupRecaptcha("recaptcha-container", recaptcha);
 
     confirmationResult = await signInWithPhoneNumber(
       auth,
@@ -488,7 +484,6 @@ async function sendPhoneOTP() {
 
     $("otpPanel").hidden = false;
     toast("Kode verifikasi telah dikirim.");
-
   } catch (error) {
     logFirebaseError("PHONE OTP ERROR", error);
     showError("authError", authErrorMessage(error));
@@ -510,7 +505,6 @@ async function verifyPhoneOTP() {
     }
 
     await confirmationResult.confirm(code);
-
   } catch (error) {
     showError("authError", authErrorMessage(error));
   }
@@ -519,10 +513,7 @@ async function verifyPhoneOTP() {
 async function completePhoneProfile() {
   try {
     const name = $("phoneProfileName").value.trim();
-
-    const username = normalizeUsername(
-      $("phoneProfileUsername").value
-    );
+    const username = normalizeUsername($("phoneProfileUsername").value);
 
     if (!name || !username) {
       throw new Error("Lengkapi nama dan username.");
@@ -536,12 +527,8 @@ async function completePhoneProfile() {
 
     closeModal("phoneProfileModal");
     await enterApp();
-
   } catch (error) {
-    showError(
-      "phoneProfileError",
-      authErrorMessage(error)
-    );
+    showError("phoneProfileError", authErrorMessage(error));
   }
 }
 
@@ -566,12 +553,8 @@ async function sendLinkPhoneOTP() {
 
     $("linkPhoneOtpPanel").hidden = false;
     toast("Kode OTP dikirim.");
-
   } catch (error) {
-    showError(
-      "linkPhoneError",
-      authErrorMessage(error)
-    );
+    showError("linkPhoneError", authErrorMessage(error));
   }
 }
 
@@ -595,12 +578,8 @@ async function verifyLinkPhoneOTP() {
 
     closeModal("linkPhoneModal");
     toast("Nomor HP berhasil dihubungkan.");
-
   } catch (error) {
-    showError(
-      "linkPhoneError",
-      authErrorMessage(error)
-    );
+    showError("linkPhoneError", authErrorMessage(error));
   }
 }
 
@@ -620,10 +599,7 @@ async function uploadImage(file, folder) {
   }
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-
-  const path =
-    `${folder}/${user.uid}/${Date.now()}_${safeName}`;
-
+  const path = `${folder}/${user.uid}/${Date.now()}_${safeName}`;
   const target = storageRef(storage, path);
 
   await uploadBytes(target, file);
@@ -644,7 +620,6 @@ async function saveProfile() {
     }
 
     let photoURL = profile.photoURL || "";
-
     const file = $("profilePhotoInput").files[0];
 
     if (file) {
@@ -663,12 +638,10 @@ async function saveProfile() {
     });
 
     profile = await loadProfile(user.uid);
-
     updateProfileUI();
+
     closeModal("profileModal");
-
     toast("Profil berhasil diperbarui.");
-
   } catch (error) {
     logFirebaseError("SAVE PROFILE ERROR", error);
     toast(authErrorMessage(error), "error");
@@ -686,7 +659,6 @@ function setTheme() {
       : "dark";
 
   document.body.dataset.theme = next;
-
   localStorage.setItem("zora-theme", next);
 }
 
@@ -720,9 +692,7 @@ async function startPrivate(otherUid, otherProfile) {
     if (!user || otherUid === user.uid) return;
 
     const id = chatIdFor(user.uid, otherUid);
-
     const chatRef = doc(db, "chats", id);
-
     const snap = await getDoc(chatRef);
 
     if (!snap.exists()) {
@@ -740,19 +710,13 @@ async function startPrivate(otherUid, otherProfile) {
       type: "private",
       members: [user.uid, otherUid],
       otherUid,
-      otherName:
-        otherProfile.name || otherProfile.username,
+      otherName: otherProfile.name || otherProfile.username,
       otherUsername: otherProfile.username,
       otherPhoto: otherProfile.photoURL || ""
     });
-
   } catch (error) {
     logFirebaseError("START PRIVATE ERROR", error);
-
-    toast(
-      "Gagal membuka chat: " + error.message,
-      "error"
-    );
+    toast("Gagal membuka chat: " + error.message, "error");
   }
 }
 
@@ -771,13 +735,10 @@ async function openConversation(id, data) {
   $("chatPanel").hidden = false;
 
   $("chatName").textContent =
-    data.name ||
-    data.otherName ||
-    data.title ||
-    "Percakapan";
+    data.name || data.otherName || data.title || "Percakapan";
 
   $("chatAvatar").textContent = initials(
-    data.otherName || data.name
+    data.otherName || data.name || data.title
   );
 
   $("chatPresence").textContent = "";
@@ -788,26 +749,34 @@ async function openConversation(id, data) {
 
   $("composer").hidden = isChannel;
   $("channelComposer").hidden = !isChannel;
-  $("inviteGroupMember").hidden =
-    activeChatType !== "group";
-
+  $("inviteGroupMember").hidden = activeChatType !== "group";
   $("channelControls").hidden = !isChannel;
 
   if (isChannel) {
+    const canDelete = isOwner || isAdmin();
+
     $("channelControls").innerHTML = `
       <div class="channel-info">
-        <strong>${escapeHTML(
-          data.title || data.name || "Saluran"
-        )}</strong>
+        <strong>${escapeHTML(data.title || data.name || "Saluran")}</strong>
         <span>${Number(data.followers || 0)} pengikut</span>
       </div>
 
-      ${isOwner
-        ? '<span class="owner-label">PEMILIK SALURAN</span>'
+      ${isOwner ? '<span class="owner-label">PEMILIK SALURAN</span>' : ""}
+
+      ${canDelete
+        ? '<button type="button" id="deleteChannelBtn" class="danger-btn">Hapus Saluran</button>'
         : ""}
     `;
 
     $("channelComposer").hidden = !isOwner;
+
+    const deleteButton = $("deleteChannelBtn");
+
+    if (deleteButton) {
+      deleteButton.onclick = () => {
+        deleteChannel(activeChat, activeChatData);
+      };
+    }
   }
 
   document.querySelector(".app")?.classList.add("chat-open");
@@ -834,17 +803,9 @@ function closeChat() {
 }
 
 function cleanupConversation() {
-  if (activeChatUnsubscribe) {
-    activeChatUnsubscribe();
-  }
-
-  if (typingUnsubscribe) {
-    typingUnsubscribe();
-  }
-
-  if (presenceUnsubscribe) {
-    presenceUnsubscribe();
-  }
+  if (activeChatUnsubscribe) activeChatUnsubscribe();
+  if (typingUnsubscribe) typingUnsubscribe();
+  if (presenceUnsubscribe) presenceUnsubscribe();
 
   activeChatUnsubscribe = null;
   typingUnsubscribe = null;
@@ -866,7 +827,6 @@ function listenMessages(id) {
 
   activeChatUnsubscribe = onSnapshot(
     q,
-
     snapshot => {
       if (activeChat !== id) return;
 
@@ -880,16 +840,10 @@ function listenMessages(id) {
       if (activeChatType === "private") {
         markMessagesRead(id);
       }
-
     },
-
     error => {
       logFirebaseError("LOAD MESSAGES ERROR", error);
-
-      toast(
-        "Gagal memuat pesan: " + error.message,
-        "error"
-      );
+      toast("Gagal memuat pesan: " + error.message, "error");
     }
   );
 }
@@ -900,88 +854,54 @@ function listenMessages(id) {
 
 function renderMessages(messages) {
   const container = $("messages");
+  if (!container) return;
 
   container.innerHTML = "";
 
-  if (!messages.length) {
+  const visibleMessages = messages.filter(message => {
+    return !(message.deletedFor || []).includes(user.uid);
+  });
+
+  if (!visibleMessages.length) {
     container.innerHTML = `
       <div class="message-empty">
         <strong>Belum ada pesan</strong>
         <span>Mulai percakapan sekarang.</span>
       </div>
     `;
-
     return;
   }
 
-  messages.forEach(message => {
+  visibleMessages.forEach(message => {
     const mine = message.senderId === user.uid;
-
-    const deletedFor = message.deletedFor || [];
-
-    if (deletedFor.includes(user.uid)) return;
-
-    const deletedAll =
-      message.deletedForEveryone === true;
+    const deletedAll = message.deletedForEveryone === true;
 
     const readByOthers = (message.readBy || []).some(
       uid => uid !== message.senderId
     );
 
     const tick = mine
-      ? `<span class="message-tick ${
-          readByOthers ? "read" : ""
-        }">${
-          readByOthers ? "✓✓" : "✓"
-        }</span>`
+      ? `<span class="message-tick ${readByOthers ? "read" : ""}">${readByOthers ? "✓✓" : "✓"}</span>`
       : "";
 
     const image = message.imageURL
-      ? `
-        <img
-          class="message-image"
-          src="${escapeHTML(message.imageURL)}"
-          alt="Gambar pesan"
-        >
-      `
+      ? `<img class="message-image" src="${escapeHTML(message.imageURL)}" alt="Gambar pesan">`
       : "";
 
     const content = deletedAll
-      ? `
-        <em class="deleted-message">
-          Pesan ini telah dihapus.
-        </em>
-      `
-      : `
-        ${image}
-        ${
-          message.text
-            ? `<div>${escapeHTML(message.text)}</div>`
-            : ""
-        }
-      `;
+      ? `<em class="deleted-message">Pesan ini telah dihapus.</em>`
+      : `${image}${message.text ? `<div>${escapeHTML(message.text)}</div>` : ""}`;
 
     const node = document.createElement("article");
 
-    node.className =
-      `message ${mine ? "mine" : "theirs"}`;
-
+    node.className = `message ${mine ? "mine" : "theirs"}`;
     node.dataset.messageId = message.id;
 
     node.innerHTML = `
-      ${
-        !mine
-          ? `
-            <small class="message-sender">
-              ${escapeHTML(message.senderName || "Pengguna")}
-            </small>
-          `
-          : ""
-      }
+      ${!mine ? `<small class="message-sender">${escapeHTML(message.senderName || "Pengguna")}</small>` : ""}
 
       <div class="message-bubble">
         ${content}
-
         <div class="message-meta">
           <time>${formatTime(message.createdAt)}</time>
           ${tick}
@@ -989,23 +909,9 @@ function renderMessages(messages) {
       </div>
 
       <div class="message-actions">
-        <button type="button" data-action="react">
-          Reaksi
-        </button>
-
-        <button type="button" data-action="delete-me">
-          Hapus untuk saya
-        </button>
-
-        ${
-          mine
-            ? `
-              <button type="button" data-action="delete-all">
-                Hapus untuk semua
-              </button>
-            `
-            : ""
-        }
+        <button type="button" data-action="react">Reaksi</button>
+        <button type="button" data-action="delete-me">Hapus untuk saya</button>
+        ${mine ? '<button type="button" data-action="delete-all">Hapus untuk semua</button>' : ""}
       </div>
 
       <div class="reaction-list">
@@ -1013,24 +919,15 @@ function renderMessages(messages) {
       </div>
     `;
 
-    node.querySelector(
-      '[data-action="react"]'
-    ).onclick = () => {
-      reactToMessage(
-        message.id,
-        message.reactions || {}
-      );
+    node.querySelector('[data-action="react"]').onclick = () => {
+      reactToMessage(message.id, message.reactions || {});
     };
 
-    node.querySelector(
-      '[data-action="delete-me"]'
-    ).onclick = () => {
+    node.querySelector('[data-action="delete-me"]').onclick = () => {
       deleteForMe(message.id);
     };
 
-    const deleteAllButton = node.querySelector(
-      '[data-action="delete-all"]'
-    );
+    const deleteAllButton = node.querySelector('[data-action="delete-all"]');
 
     if (deleteAllButton) {
       deleteAllButton.onclick = () => {
@@ -1048,14 +945,10 @@ function renderMessages(messages) {
 
 function renderReactions(reactions = {}) {
   return Object.entries(reactions)
-    .filter(([, users]) =>
-      Array.isArray(users) && users.length
-    )
+    .filter(([, users]) => Array.isArray(users) && users.length)
     .map(([emoji, users]) => `
       <button
-        class="reaction-chip ${
-          users.includes(user.uid) ? "selected" : ""
-        }"
+        class="reaction-chip ${users.includes(user.uid) ? "selected" : ""}"
         data-emoji="${escapeHTML(emoji)}"
         type="button"
       >
@@ -1072,9 +965,11 @@ function renderReactions(reactions = {}) {
 async function sendMessage() {
   if (!activeChat || activeChatType === "channel") return;
 
-  const text = $("messageInput").value.trim();
+  const input = $("messageInput");
+  const imageInput = $("imageInput");
 
-  const file = $("imageInput").files[0];
+  const text = input.value.trim();
+  const file = imageInput.files[0];
 
   if (!text && !file) return;
 
@@ -1090,11 +985,12 @@ async function sendMessage() {
 
     const payload = {
       senderId: user.uid,
-      senderName: profile.name || profile.username,
+      senderName: String(profile.name || profile.username || "Pengguna"),
       text,
       imageURL,
       reactions: {},
       readBy: [user.uid],
+      deletedFor: [],
       createdAt: serverTimestamp()
     };
 
@@ -1102,50 +998,39 @@ async function sendMessage() {
       ? collection(db, "groups", targetChat, "messages")
       : collection(db, "chats", targetChat, "messages");
 
-    // Simpan pesan terlebih dahulu.
     await addDoc(target, payload);
 
-    // Kosongkan input setelah pesan tersimpan.
     if (activeChat === targetChat) {
-      $("messageInput").value = "";
-      $("imageInput").value = "";
+      input.value = "";
+      imageInput.value = "";
     }
 
-    // Preview chat diperbarui secara terpisah.
     try {
-      const chatRef = doc(
+      const parentRef = doc(
         db,
         targetType === "group" ? "groups" : "chats",
         targetChat
       );
 
-      await updateDoc(chatRef, {
+      await updateDoc(parentRef, {
         lastMessage: text || "Mengirim gambar",
         lastSenderId: user.uid,
         updatedAt: serverTimestamp()
       });
-
-    } catch (previewError) {
-      logFirebaseError(
-        "CHAT PREVIEW UPDATE ERROR",
-        previewError
-      );
-
-      toast(
-        "Pesan tersimpan, tetapi preview chat gagal diperbarui.",
-        "error"
-      );
+    } catch (error) {
+      logFirebaseError("MESSAGE PREVIEW ERROR", error);
     }
 
-    await updateTyping(false);
+    try {
+      await updateTyping(false);
+    } catch (error) {
+      console.warn("STOP TYPING ERROR:", error);
+    }
 
+    toast("Pesan berhasil dikirim.");
   } catch (error) {
     logFirebaseError("SEND MESSAGE ERROR", error);
-
-    toast(
-      "Pesan gagal dikirim: " + error.message,
-      "error"
-    );
+    toast("Gagal mengirim pesan: " + (error.code || error.message), "error");
   }
 }
 
@@ -1159,29 +1044,20 @@ async function deleteForMe(messageId) {
   try {
     await updateDoc(
       doc(messagesCollection(activeChat), messageId),
-      {
-        deletedFor: arrayUnion(user.uid)
-      }
+      { deletedFor: arrayUnion(user.uid) }
     );
 
     toast("Pesan dihapus dari tampilan lu.");
-
   } catch (error) {
     logFirebaseError("DELETE FOR ME ERROR", error);
-
-    toast(
-      "Gagal menghapus pesan: " + error.message,
-      "error"
-    );
+    toast("Gagal menghapus pesan: " + error.message, "error");
   }
 }
 
 async function deleteForEveryone(messageId) {
   if (!activeChat) return;
 
-  if (!confirm("Hapus pesan ini untuk semua orang?")) {
-    return;
-  }
+  if (!confirm("Hapus pesan ini untuk semua orang?")) return;
 
   try {
     await updateDoc(
@@ -1194,14 +1070,9 @@ async function deleteForEveryone(messageId) {
     );
 
     toast("Pesan dihapus untuk semua orang.");
-
   } catch (error) {
     logFirebaseError("DELETE EVERYONE ERROR", error);
-
-    toast(
-      "Gagal menghapus pesan: " + error.message,
-      "error"
-    );
+    toast("Gagal menghapus pesan: " + error.message, "error");
   }
 }
 
@@ -1210,18 +1081,9 @@ async function deleteForEveryone(messageId) {
 // =====================================
 
 async function reactToMessage(messageId, reactions) {
-  const choices = [
-    "👍",
-    "❤️",
-    "😂",
-    "😮",
-    "😢",
-    "🙏"
-  ];
+  const choices = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-  const selected = prompt(
-    "Pilih reaksi:\n" + choices.join(" ")
-  );
+  const selected = prompt("Pilih reaksi:\n" + choices.join(" "));
 
   if (!choices.includes(selected)) return;
 
@@ -1231,20 +1093,14 @@ async function reactToMessage(messageId, reactions) {
 
   const index = users.indexOf(user.uid);
 
-  if (index >= 0) {
-    users.splice(index, 1);
-  } else {
-    users.push(user.uid);
-  }
+  if (index >= 0) users.splice(index, 1);
+  else users.push(user.uid);
 
   try {
     await updateDoc(
       doc(messagesCollection(activeChat), messageId),
-      {
-        [`reactions.${selected}`]: users
-      }
+      { [`reactions.${selected}`]: users }
     );
-
   } catch (error) {
     logFirebaseError("REACTION ERROR", error);
     toast(error.message, "error");
@@ -1264,7 +1120,6 @@ async function markMessagesRead(chatId) {
     );
 
     const snap = await getDocs(q);
-
     const jobs = [];
 
     snap.forEach(item => {
@@ -1283,7 +1138,6 @@ async function markMessagesRead(chatId) {
     });
 
     await Promise.all(jobs);
-
   } catch (error) {
     logFirebaseError("READ RECEIPT ERROR", error);
   }
@@ -1304,20 +1158,12 @@ async function hideChat(chatId) {
     );
 
     hiddenChats.add(chatId);
-
     closeChat();
-
     toast("Chat disembunyikan dari daftar lu.");
-
     listenChats();
-
   } catch (error) {
     logFirebaseError("HIDE CHAT ERROR", error);
-
-    toast(
-      "Gagal menyembunyikan chat: " + error.message,
-      "error"
-    );
+    toast("Gagal menyembunyikan chat: " + error.message, "error");
   }
 }
 
@@ -1328,9 +1174,7 @@ async function loadHiddenChats() {
     collection(db, "users", user.uid, "hiddenChats")
   );
 
-  snap.forEach(item => {
-    hiddenChats.add(item.id);
-  });
+  snap.forEach(item => hiddenChats.add(item.id));
 }
 
 // =====================================
@@ -1338,9 +1182,7 @@ async function loadHiddenChats() {
 // =====================================
 
 function listenChats() {
-  if (chatListUnsubscribe) {
-    chatListUnsubscribe();
-  }
+  if (chatListUnsubscribe) chatListUnsubscribe();
 
   const q = query(
     collection(db, "chats"),
@@ -1349,21 +1191,17 @@ function listenChats() {
 
   chatListUnsubscribe = onSnapshot(
     q,
-
     async snapshot => {
+      const container = $("chatList");
+      if (!container) return;
+
       const items = snapshot.docs
         .filter(item => !hiddenChats.has(item.id))
         .sort((a, b) => {
-          const ta =
-            a.data().updatedAt?.toMillis?.() || 0;
-
-          const tb =
-            b.data().updatedAt?.toMillis?.() || 0;
-
+          const ta = a.data().updatedAt?.toMillis?.() || 0;
+          const tb = b.data().updatedAt?.toMillis?.() || 0;
           return tb - ta;
         });
-
-      const container = $("chatList");
 
       container.innerHTML = "";
 
@@ -1379,19 +1217,10 @@ function listenChats() {
         let other = {};
 
         try {
-          const snap = await getDoc(
-            doc(db, "users", otherUid)
-          );
-
-          if (snap.exists()) {
-            other = snap.data();
-          }
-
+          const snap = await getDoc(doc(db, "users", otherUid));
+          if (snap.exists()) other = snap.data();
         } catch (error) {
-          logFirebaseError(
-            "LOAD CHAT USER ERROR",
-            error
-          );
+          logFirebaseError("LOAD CHAT USER ERROR", error);
         }
 
         const row = document.createElement("button");
@@ -1400,29 +1229,12 @@ function listenChats() {
         row.className = "list-item";
 
         row.innerHTML = `
-          <span class="avatar">
-            ${escapeHTML(
-              initials(other.name || other.username)
-            )}
-          </span>
-
+          <span class="avatar">${escapeHTML(initials(other.name || other.username))}</span>
           <span class="list-copy">
-            <strong>
-              ${escapeHTML(
-                other.name || other.username || "Pengguna"
-              )}
-            </strong>
-
-            <small>
-              ${escapeHTML(
-                data.lastMessage || "Mulai percakapan"
-              )}
-            </small>
+            <strong>${escapeHTML(other.name || other.username || "Pengguna")}</strong>
+            <small>${escapeHTML(data.lastMessage || "Mulai percakapan")}</small>
           </span>
-
-          <span class="list-time">
-            ${formatTime(data.updatedAt)}
-          </span>
+          <span class="list-time">${formatTime(data.updatedAt)}</span>
         `;
 
         row.onclick = () => {
@@ -1447,21 +1259,12 @@ function listenChats() {
       }
 
       if (!container.children.length) {
-        container.innerHTML = `
-          <div class="empty-list">
-            Belum ada percakapan.
-          </div>
-        `;
+        container.innerHTML = `<div class="empty-list">Belum ada percakapan.</div>`;
       }
     },
-
     error => {
       logFirebaseError("LOAD CHATS ERROR", error);
-
-      toast(
-        "Gagal memuat chat: " + error.message,
-        "error"
-      );
+      toast("Gagal memuat chat: " + error.message, "error");
     }
   );
 }
@@ -1471,10 +1274,7 @@ function listenChats() {
 // =====================================
 
 async function searchUsers() {
-  const term = normalizeUsername(
-    $("searchUser").value
-  );
-
+  const term = normalizeUsername($("searchUser").value);
   const output = $("searchResults");
 
   output.innerHTML = "";
@@ -1496,50 +1296,33 @@ async function searchUsers() {
 
       if (data.uid === user.uid) continue;
 
-      const userSnap = await getDoc(
-        doc(db, "users", data.uid)
-      );
-
+      const userSnap = await getDoc(doc(db, "users", data.uid));
       if (!userSnap.exists()) continue;
 
       const target = userSnap.data();
-
       const button = document.createElement("button");
 
       button.className = "search-result";
       button.type = "button";
 
       button.innerHTML = `
-        <span class="avatar">
-          ${escapeHTML(initials(target.name))}
-        </span>
-
+        <span class="avatar">${escapeHTML(initials(target.name))}</span>
         <span>
           <strong>${escapeHTML(target.name)}</strong>
           <small>@${escapeHTML(target.username)}</small>
         </span>
       `;
 
-      button.onclick = () => {
-        startPrivate(data.uid, target);
-      };
-
+      button.onclick = () => startPrivate(data.uid, target);
       output.appendChild(button);
     }
 
     if (!output.children.length) {
-      output.innerHTML = `
-        <div class="empty-list">
-          Pengguna tidak ditemukan.
-        </div>
-      `;
+      output.innerHTML = `<div class="empty-list">Pengguna tidak ditemukan.</div>`;
     }
-
   } catch (error) {
     logFirebaseError("SEARCH USERS ERROR", error);
-
-    output.textContent =
-      "Pencarian gagal: " + error.message;
+    output.textContent = "Pencarian gagal: " + error.message;
   }
 }
 
@@ -1548,14 +1331,9 @@ async function searchUsers() {
 // =====================================
 
 async function updateTyping(isTyping) {
-  if (!activeChat || activeChatType !== "private") {
-    return;
-  }
+  if (!activeChat || activeChatType !== "private") return;
 
-  const path = dbRef(
-    rtdb,
-    `typing/${activeChat}/${user.uid}`
-  );
+  const path = dbRef(rtdb, `typing/${activeChat}/${user.uid}`);
 
   await rtdbSet(
     path,
@@ -1574,21 +1352,16 @@ function listenTyping(chatId) {
 
   typingUnsubscribe = onValue(
     path,
-
     snapshot => {
       const data = snapshot.val() || {};
 
       const other = Object.entries(data).find(
-        ([uid, value]) =>
-          uid !== user.uid && value?.typing
+        ([uid, value]) => uid !== user.uid && value?.typing
       );
 
       $("typingIndicator").hidden = !other;
     },
-
-    error => {
-      console.warn("TYPING ERROR:", error);
-    }
+    error => console.warn("TYPING ERROR:", error)
   );
 }
 
@@ -1599,36 +1372,24 @@ function listenTyping(chatId) {
 function listenPresence(otherUid) {
   if (!otherUid) return;
 
-  const path = dbRef(
-    rtdb,
-    `presence/${otherUid}`
-  );
+  const path = dbRef(rtdb, `presence/${otherUid}`);
 
   presenceUnsubscribe = onValue(
     path,
-
     snapshot => {
       const data = snapshot.val();
 
       $("chatPresence").textContent =
-        data?.state === "online"
-          ? "Online"
-          : "Offline";
+        data?.state === "online" ? "Online" : "Offline";
     },
-
-    error => {
-      console.warn("PRESENCE ERROR:", error);
-    }
+    error => console.warn("PRESENCE ERROR:", error)
   );
 }
 
 async function setPresence(state) {
   if (!user) return;
 
-  const path = dbRef(
-    rtdb,
-    `presence/${user.uid}`
-  );
+  const path = dbRef(rtdb, `presence/${user.uid}`);
 
   await rtdbSet(path, {
     state,
@@ -1636,7 +1397,7 @@ async function setPresence(state) {
   });
 
   if (state === "online") {
-    onDisconnect(path).set({
+    await onDisconnect(path).set({
       state: "offline",
       lastChanged: rtdbTimestamp()
     });
@@ -1649,7 +1410,6 @@ async function setPresence(state) {
 
 async function createGroup() {
   const name = prompt("Nama grup:");
-
   if (!name?.trim()) return;
 
   const memberText = prompt(
@@ -1665,55 +1425,45 @@ async function createGroup() {
     const members = [
       ...new Set([
         user.uid,
-        ...memberText
-          .split(",")
-          .map(value => value.trim())
-          .filter(Boolean)
+        ...memberText.split(",").map(value => value.trim()).filter(Boolean)
       ])
     ];
 
     if (members.length < 2) {
-      throw new Error(
-        "Grup harus memiliki minimal 2 anggota."
-      );
+      throw new Error("Grup harus memiliki minimal 2 anggota.");
     }
 
-    const ref = await addDoc(
-      collection(db, "groups"),
-      {
-        name: name.trim(),
-        ownerId: user.uid,
-        members,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        lastMessage: "",
-        lastSenderId: ""
-      }
-    );
+    const groupRef = await addDoc(collection(db, "groups"), {
+      name: name.trim(),
+      ownerId: user.uid,
+      members,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessage: "",
+      lastSenderId: ""
+    });
 
     toast("Grup berhasil dibuat.");
 
-    await openConversation(ref.id, {
+    await openConversation(groupRef.id, {
       type: "group",
       name: name.trim(),
       members,
       ownerId: user.uid
     });
-
   } catch (error) {
     logFirebaseError("CREATE GROUP ERROR", error);
-
-    toast(
-      "Gagal membuat grup: " + error.message,
-      "error"
-    );
+    toast("Gagal membuat grup: " + error.message, "error");
   }
 }
 
 function listenGroups() {
   if (groupUnsubscribe) {
     groupUnsubscribe();
+    groupUnsubscribe = null;
   }
+
+  if (!user) return;
 
   const q = query(
     collection(db, "groups"),
@@ -1722,15 +1472,14 @@ function listenGroups() {
 
   groupUnsubscribe = onSnapshot(
     q,
-
     snapshot => {
       const container = $("groupList");
+      if (!container) return;
 
       container.innerHTML = "";
 
       snapshot.forEach(item => {
         const data = item.data();
-
         const button = document.createElement("button");
 
         button.className = "list-item";
@@ -1738,12 +1487,9 @@ function listenGroups() {
 
         button.innerHTML = `
           <span class="avatar">G</span>
-
           <span class="list-copy">
-            <strong>${escapeHTML(data.name)}</strong>
-            <small>
-              ${(data.members || []).length} anggota
-            </small>
+            <strong>${escapeHTML(data.name || "Grup")}</strong>
+            <small>${(data.members || []).length} anggota</small>
           </span>
         `;
 
@@ -1759,46 +1505,28 @@ function listenGroups() {
       });
 
       if (!container.children.length) {
-        container.innerHTML = `
-          <div class="empty-list">
-            Belum bergabung dengan grup.
-          </div>
-        `;
+        container.innerHTML = `<div class="empty-list">Belum bergabung dengan grup.</div>`;
       }
     },
-
     error => {
       logFirebaseError("LOAD GROUPS ERROR", error);
-
-      toast(
-        "Gagal memuat grup: " + error.message,
-        "error"
-      );
+      toast("Gagal memuat grup: " + (error.code || error.message), "error");
     }
   );
 }
 
 async function inviteGroupMember() {
-  if (!activeChat || activeChatType !== "group") {
-    return;
-  }
+  if (!activeChat || activeChatType !== "group") return;
 
-  const uid = prompt(
-    "Masukkan UID pengguna yang ingin ditambahkan:"
-  );
-
+  const uid = prompt("Masukkan UID pengguna yang ingin ditambahkan:");
   if (!uid?.trim()) return;
 
   try {
-    await updateDoc(
-      doc(db, "groups", activeChat),
-      {
-        members: arrayUnion(uid.trim())
-      }
-    );
+    await updateDoc(doc(db, "groups", activeChat), {
+      members: arrayUnion(uid.trim())
+    });
 
     toast("Anggota ditambahkan.");
-
   } catch (error) {
     logFirebaseError("INVITE MEMBER ERROR", error);
     toast(error.message, "error");
@@ -1811,56 +1539,44 @@ async function inviteGroupMember() {
 
 async function createChannel() {
   const title = prompt("Nama saluran:");
-
   if (!title?.trim()) return;
 
   try {
-    const ref = await addDoc(
-      collection(db, "channels"),
-      {
-        title: title.trim(),
-        ownerId: user.uid,
-        followers: 0,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }
-    );
+    const channelRef = await addDoc(collection(db, "channels"), {
+      title: title.trim(),
+      ownerId: user.uid,
+      followers: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
 
     toast("Saluran berhasil dibuat.");
 
-    await openConversation(ref.id, {
+    await openConversation(channelRef.id, {
       type: "channel",
       title: title.trim(),
       ownerId: user.uid,
       followers: 0
     });
-
   } catch (error) {
     logFirebaseError("CREATE CHANNEL ERROR", error);
-
-    toast(
-      "Gagal membuat saluran: " + error.message,
-      "error"
-    );
+    toast("Gagal membuat saluran: " + error.message, "error");
   }
 }
 
 function listenChannels() {
-  if (channelUnsubscribe) {
-    channelUnsubscribe();
-  }
+  if (channelUnsubscribe) channelUnsubscribe();
 
   channelUnsubscribe = onSnapshot(
     collection(db, "channels"),
-
     snapshot => {
       const container = $("channelList");
+      if (!container) return;
 
       container.innerHTML = "";
 
       snapshot.forEach(item => {
         const data = item.data();
-
         const button = document.createElement("button");
 
         button.className = "list-item";
@@ -1868,15 +1584,9 @@ function listenChannels() {
 
         button.innerHTML = `
           <span class="avatar">Z</span>
-
           <span class="list-copy">
-            <strong>
-              ${escapeHTML(data.title || "Saluran")}
-            </strong>
-
-            <small>
-              ${Number(data.followers || 0)} pengikut
-            </small>
+            <strong>${escapeHTML(data.title || "Saluran")}</strong>
+            <small>${Number(data.followers || 0)} pengikut</small>
           </span>
         `;
 
@@ -1892,23 +1602,60 @@ function listenChannels() {
       });
 
       if (!container.children.length) {
-        container.innerHTML = `
-          <div class="empty-list">
-            Belum ada saluran.
-          </div>
-        `;
+        container.innerHTML = `<div class="empty-list">Belum ada saluran.</div>`;
       }
     },
-
     error => {
       logFirebaseError("LOAD CHANNELS ERROR", error);
-
-      toast(
-        "Gagal memuat saluran: " + error.message,
-        "error"
-      );
+      toast("Gagal memuat saluran: " + error.message, "error");
     }
   );
+}
+
+// Hapus semua dokumen subkoleksi sebelum dokumen saluran.
+async function deleteChannel(channelId, channelData) {
+  if (!user || !channelData) return;
+
+  if (
+    user.uid !== ADMIN_UID &&
+    channelData.ownerId !== user.uid
+  ) {
+    toast("Hanya pemilik atau admin yang bisa menghapus saluran.", "error");
+    return;
+  }
+
+  if (!confirm("Yakin ingin menghapus saluran ini beserta postingan dan follower?")) {
+    return;
+  }
+
+  try {
+    const posts = await getDocs(
+      collection(db, "channels", channelId, "posts")
+    );
+
+    for (const item of posts.docs) {
+      await deleteDoc(item.ref);
+    }
+
+    const followers = await getDocs(
+      collection(db, "channels", channelId, "followers")
+    );
+
+    for (const item of followers.docs) {
+      await deleteDoc(item.ref);
+    }
+
+    await deleteDoc(doc(db, "channels", channelId));
+
+    if (activeChat === channelId) {
+      closeChat();
+    }
+
+    toast("Saluran berhasil dihapus.");
+  } catch (error) {
+    logFirebaseError("DELETE CHANNEL ERROR", error);
+    toast("Gagal menghapus saluran: " + (error.code || error.message), "error");
+  }
 }
 
 // =====================================
@@ -1916,21 +1663,14 @@ function listenChannels() {
 // =====================================
 
 async function sendChannelPost() {
-  if (!activeChat || activeChatType !== "channel") {
-    return;
-  }
+  if (!activeChat || activeChatType !== "channel") return;
 
   if (activeChatData.ownerId !== user.uid) {
-    toast(
-      "Hanya pemilik saluran yang dapat membuat postingan.",
-      "error"
-    );
-
+    toast("Hanya pemilik saluran yang dapat membuat postingan.", "error");
     return;
   }
 
   const text = $("channelPostInput").value.trim();
-
   const file = $("channelImageInput").files[0];
 
   if (!text && !file) return;
@@ -1957,7 +1697,6 @@ async function sendChannelPost() {
     $("channelImageInput").value = "";
 
     toast("Postingan diterbitkan.");
-
   } catch (error) {
     logFirebaseError("CHANNEL POST ERROR", error);
     toast(error.message, "error");
@@ -1965,45 +1704,27 @@ async function sendChannelPost() {
 }
 
 async function toggleFollowChannel() {
-  if (!activeChat || activeChatType !== "channel") {
-    return;
-  }
+  if (!activeChat || activeChatType !== "channel") return;
 
-  const followRef = doc(
-    db,
-    "channels",
-    activeChat,
-    "followers",
-    user.uid
-  );
-
-  const channelRef = doc(
-    db,
-    "channels",
-    activeChat
-  );
+  const followRef = doc(db, "channels", activeChat, "followers", user.uid);
+  const channelRef = doc(db, "channels", activeChat);
 
   try {
     await runTransaction(db, async transaction => {
       const existing = await transaction.get(followRef);
-
       const channel = await transaction.get(channelRef);
 
       if (!channel.exists()) {
         throw new Error("Saluran tidak ditemukan.");
       }
 
-      const count = Number(
-        channel.data().followers || 0
-      );
+      const count = Number(channel.data().followers || 0);
 
       if (existing.exists()) {
         transaction.delete(followRef);
-
         transaction.update(channelRef, {
           followers: Math.max(0, count - 1)
         });
-
       } else {
         transaction.set(followRef, {
           uid: user.uid,
@@ -2017,7 +1738,6 @@ async function toggleFollowChannel() {
     });
 
     toast("Status mengikuti saluran diperbarui.");
-
   } catch (error) {
     logFirebaseError("FOLLOW CHANNEL ERROR", error);
     toast(error.message, "error");
@@ -2037,31 +1757,22 @@ async function createStatus() {
   }
 
   try {
-    await addDoc(
-      collection(db, "statuses"),
-      {
-        uid: user.uid,
-        name: profile.name,
-        username: profile.username,
-        text,
-        createdAt: serverTimestamp(),
-        expiresAt: Date.now() + 86400000
-      }
-    );
+    await addDoc(collection(db, "statuses"), {
+      uid: user.uid,
+      name: profile.name,
+      username: profile.username,
+      text,
+      createdAt: serverTimestamp(),
+      expiresAt: Date.now() + 86400000
+    });
 
     $("statusInput").value = "";
-
     closeModal("statusModal");
 
     toast("Status berhasil dipublikasikan.");
-
   } catch (error) {
     logFirebaseError("CREATE STATUS ERROR", error);
-
-    toast(
-      "Gagal membuat status: " + error.message,
-      "error"
-    );
+    toast("Gagal membuat status: " + error.message, "error");
   }
 }
 
@@ -2079,7 +1790,6 @@ function listenStatuses() {
 
   statusUnsubscribe = onSnapshot(
     statusQuery,
-
     snapshot => {
       const mine = $("myStatuses");
       const others = $("statusList");
@@ -2092,11 +1802,7 @@ function listenStatuses() {
       snapshot.forEach(item => {
         const data = item.data();
 
-        if (
-          Number(data.expiresAt || 0) < Date.now()
-        ) {
-          return;
-        }
+        if (Number(data.expiresAt || 0) < Date.now()) return;
 
         const button = document.createElement("button");
 
@@ -2104,29 +1810,28 @@ function listenStatuses() {
         button.type = "button";
 
         button.innerHTML = `
-          <span class="status-ring">
-            ${escapeHTML(initials(data.name))}
-          </span>
-
+          <span class="status-ring">${escapeHTML(initials(data.name))}</span>
           <span>
-            <strong>
-              ${escapeHTML(data.name || "Pengguna")}
-            </strong>
-
-            <small>
-              ${formatDate(data.createdAt)}
-            </small>
+            <strong>${escapeHTML(data.name || "Pengguna")}</strong>
+            <small>${formatDate(data.createdAt)}</small>
           </span>
         `;
 
         button.onclick = () => {
-          currentStatus = data;
+          currentStatus = {
+            id: item.id,
+            ...data
+          };
 
-          $("viewStatusName").textContent =
-            data.name || "Status";
+          $("viewStatusName").textContent = data.name || "Status";
+          $("viewStatusText").textContent = data.text || "";
 
-          $("viewStatusText").textContent =
-            data.text || "";
+          const deleteButton = $("deleteStatusBtn");
+
+          if (deleteButton) {
+            deleteButton.hidden =
+              data.uid !== user.uid && !isAdmin();
+          }
 
           openModal("viewStatusModal");
         };
@@ -2137,18 +1842,38 @@ function listenStatuses() {
           others.appendChild(button);
         }
       });
-
     },
-
     error => {
       logFirebaseError("LOAD STATUSES ERROR", error);
-
-      toast(
-        "Gagal memuat status: " + error.message,
-        "error"
-      );
+      toast("Gagal memuat status: " + error.message, "error");
     }
   );
+}
+
+async function deleteStatus() {
+  if (!currentStatus?.id) return;
+
+  if (
+    currentStatus.uid !== user.uid &&
+    !isAdmin()
+  ) {
+    toast("Lu tidak memiliki izin menghapus status ini.", "error");
+    return;
+  }
+
+  if (!confirm("Yakin ingin menghapus status ini?")) return;
+
+  try {
+    await deleteDoc(doc(db, "statuses", currentStatus.id));
+
+    currentStatus = null;
+    closeModal("viewStatusModal");
+
+    toast("Status berhasil dihapus.");
+  } catch (error) {
+    logFirebaseError("DELETE STATUS ERROR", error);
+    toast("Gagal menghapus status: " + (error.code || error.message), "error");
+  }
 }
 
 // =====================================
@@ -2159,35 +1884,27 @@ async function sendAppeal() {
   const text = $("appealText").value.trim();
 
   if (text.length < 10) {
-    $("appealMessage").textContent =
-      "Alasan banding minimal 10 karakter.";
-
+    $("appealMessage").textContent = "Alasan banding minimal 10 karakter.";
     return;
   }
 
   try {
-    await addDoc(
-      collection(db, "appeals"),
-      {
-        uid: user.uid,
-        username: profile?.username || "",
-        name: profile?.name || "",
-        reason: text,
-        status: "pending",
-        createdAt: serverTimestamp()
-      }
-    );
+    await addDoc(collection(db, "appeals"), {
+      uid: user.uid,
+      username: profile?.username || "",
+      name: profile?.name || "",
+      reason: text,
+      status: "pending",
+      createdAt: serverTimestamp()
+    });
 
     $("appealText").value = "";
-
     $("appealMessage").textContent =
       "Banding berhasil dikirim dan menunggu peninjauan.";
 
     toast("Banding berhasil dikirim.");
-
   } catch (error) {
     logFirebaseError("APPEAL ERROR", error);
-
     $("appealMessage").textContent =
       "Gagal mengirim banding: " + error.message;
   }
@@ -2198,18 +1915,15 @@ async function sendAppeal() {
 // =====================================
 
 async function findAdminUser() {
-  if (user.uid !== ADMIN_UID) return;
+  if (!isAdmin()) return;
 
   const term = $("adminSearch").value.trim();
-
   const output = $("adminUserResult");
 
   output.innerHTML = "";
 
   if (!term) {
-    output.textContent =
-      "Masukkan UID, username, atau email.";
-
+    output.textContent = "Masukkan UID, username, atau email.";
     return;
   }
 
@@ -2217,131 +1931,67 @@ async function findAdminUser() {
     let found = null;
 
     if (term.length > 25 && !term.startsWith("@")) {
-      const snap = await getDoc(
-        doc(db, "users", term)
-      );
+      const snap = await getDoc(doc(db, "users", term));
 
       if (snap.exists()) {
-        found = {
-          uid: snap.id,
-          ...snap.data()
-        };
+        found = { uid: snap.id, ...snap.data() };
       }
     }
 
     if (!found && !term.includes("@")) {
       const username = normalizeUsername(term);
-
-      const usernameSnap = await getDoc(
-        doc(db, "usernames", username)
-      );
+      const usernameSnap = await getDoc(doc(db, "usernames", username));
 
       if (usernameSnap.exists()) {
         const uid = usernameSnap.data().uid;
-
-        const snap = await getDoc(
-          doc(db, "users", uid)
-        );
+        const snap = await getDoc(doc(db, "users", uid));
 
         if (snap.exists()) {
-          found = {
-            uid: snap.id,
-            ...snap.data()
-          };
+          found = { uid: snap.id, ...snap.data() };
         }
       }
     }
 
     if (!found) {
-      output.innerHTML = `
-        <div class="empty-list">
-          Pengguna tidak ditemukan.
-        </div>
-      `;
-
+      output.innerHTML = `<div class="empty-list">Pengguna tidak ditemukan.</div>`;
       return;
     }
 
     output.innerHTML = `
       <div class="admin-user-card">
-
-        <strong>
-          ${escapeHTML(found.name || "Pengguna")}
-        </strong>
-
-        <span>
-          @${escapeHTML(found.username || "-")}
-        </span>
-
-        <small>
-          UID: ${escapeHTML(found.uid)}
-        </small>
-
-        <small>
-          Status: ${escapeHTML(found.status || "active")}
-        </small>
-
-        <small>
-          Email: ${escapeHTML(found.email || "-")}
-        </small>
-
-        <small>
-          Verifikasi:
-          ${found.verified ? "Terverifikasi" : "Belum terverifikasi"}
-        </small>
+        <strong>${escapeHTML(found.name || "Pengguna")}</strong>
+        <span>@${escapeHTML(found.username || "-")}</span>
+        <small>UID: ${escapeHTML(found.uid)}</small>
+        <small>Status: ${escapeHTML(found.status || "active")}</small>
+        <small>Email: ${escapeHTML(found.email || "-")}</small>
+        <small>Verifikasi: ${found.verified ? "Terverifikasi" : "Belum terverifikasi"}</small>
 
         <div class="admin-actions">
-          <button data-status="hold">
-            Tahan sementara
-          </button>
-
-          <button data-status="permanent">
-            Nonaktifkan permanen
-          </button>
-
-          <button data-status="active">
-            Pulihkan akun
-          </button>
-
-          <button data-verify="true">
-            Verifikasi
-          </button>
-
-          <button data-verify="false">
-            Cabut verifikasi
-          </button>
+          <button data-status="hold">Tahan sementara</button>
+          <button data-status="permanent">Nonaktifkan permanen</button>
+          <button data-status="active">Pulihkan akun</button>
+          <button data-verify="true">Verifikasi</button>
+          <button data-verify="false">Cabut verifikasi</button>
         </div>
-
       </div>
     `;
 
-    output.querySelectorAll("[data-status]").forEach(
-      button => {
-        button.onclick = () => {
-          updateUserStatus(
-            found.uid,
-            button.dataset.status
-          );
-        };
-      }
-    );
+    output.querySelectorAll("[data-status]").forEach(button => {
+      button.onclick = () => updateUserStatus(
+        found.uid,
+        button.dataset.status
+      );
+    });
 
-    output.querySelectorAll("[data-verify]").forEach(
-      button => {
-        button.onclick = () => {
-          setVerification(
-            found.uid,
-            button.dataset.verify === "true"
-          );
-        };
-      }
-    );
-
+    output.querySelectorAll("[data-verify]").forEach(button => {
+      button.onclick = () => setVerification(
+        found.uid,
+        button.dataset.verify === "true"
+      );
+    });
   } catch (error) {
     logFirebaseError("ADMIN SEARCH ERROR", error);
-
-    output.textContent =
-      "Pencarian gagal: " + error.message;
+    output.textContent = "Pencarian gagal: " + error.message;
   }
 }
 
@@ -2350,7 +2000,7 @@ async function findAdminUser() {
 // =====================================
 
 async function updateUserStatus(uid, status) {
-  if (user.uid !== ADMIN_UID) return;
+  if (!isAdmin()) return;
 
   const labels = {
     active: "memulihkan akun",
@@ -2358,9 +2008,7 @@ async function updateUserStatus(uid, status) {
     permanent: "menonaktifkan akun secara permanen"
   };
 
-  if (!confirm(`Yakin ingin ${labels[status]}?`)) {
-    return;
-  }
+  if (!confirm(`Yakin ingin ${labels[status]}?`)) return;
 
   try {
     await updateDoc(doc(db, "users", uid), {
@@ -2369,21 +2017,15 @@ async function updateUserStatus(uid, status) {
     });
 
     toast("Status pengguna berhasil diperbarui.");
-
     findAdminUser();
-
   } catch (error) {
     logFirebaseError("ADMIN STATUS ERROR", error);
-
-    toast(
-      "Gagal mengubah status: " + error.message,
-      "error"
-    );
+    toast("Gagal mengubah status: " + error.message, "error");
   }
 }
 
 async function setVerification(uid, verified) {
-  if (user.uid !== ADMIN_UID) return;
+  if (!isAdmin()) return;
 
   try {
     await updateDoc(doc(db, "users", uid), {
@@ -2391,14 +2033,8 @@ async function setVerification(uid, verified) {
       updatedAt: serverTimestamp()
     });
 
-    toast(
-      verified
-        ? "Lencana verifikasi diberikan."
-        : "Verifikasi dicabut."
-    );
-
+    toast(verified ? "Lencana verifikasi diberikan." : "Verifikasi dicabut.");
     findAdminUser();
-
   } catch (error) {
     logFirebaseError("ADMIN VERIFY ERROR", error);
     toast(error.message, "error");
@@ -2410,11 +2046,9 @@ async function setVerification(uid, verified) {
 // =====================================
 
 function listenAppeals() {
-  if (user.uid !== ADMIN_UID) return;
+  if (!isAdmin()) return;
 
-  if (appealUnsubscribe) {
-    appealUnsubscribe();
-  }
+  if (appealUnsubscribe) appealUnsubscribe();
 
   appealUnsubscribe = onSnapshot(
     query(
@@ -2422,110 +2056,69 @@ function listenAppeals() {
       orderBy("createdAt", "desc"),
       limit(50)
     ),
-
     snapshot => {
       const container = $("appealList");
-
       container.innerHTML = "";
 
       snapshot.forEach(item => {
         const data = item.data();
-
         const card = document.createElement("div");
 
         card.className = "appeal-card";
 
         card.innerHTML = `
-          <strong>
-            ${escapeHTML(
-              data.name || data.username || data.uid
-            )}
-          </strong>
-
-          <small>
-            UID: ${escapeHTML(data.uid)}
-          </small>
-
-          <p>
-            ${escapeHTML(data.reason)}
-          </p>
-
-          <span class="appeal-status">
-            ${escapeHTML(data.status || "pending")}
-          </span>
+          <strong>${escapeHTML(data.name || data.username || data.uid)}</strong>
+          <small>UID: ${escapeHTML(data.uid)}</small>
+          <p>${escapeHTML(data.reason)}</p>
+          <span class="appeal-status">${escapeHTML(data.status || "pending")}</span>
 
           <div class="admin-actions">
-            <button data-appeal="approved">
-              Setujui
-            </button>
-
-            <button data-appeal="rejected">
-              Tolak
-            </button>
+            <button data-appeal="approved">Setujui</button>
+            <button data-appeal="rejected">Tolak</button>
           </div>
         `;
 
-        card.querySelectorAll("[data-appeal]").forEach(
-          button => {
-            button.onclick = async () => {
-              const status = button.dataset.appeal;
+        card.querySelectorAll("[data-appeal]").forEach(button => {
+          button.onclick = async () => {
+            const status = button.dataset.appeal;
 
-              try {
-                await updateDoc(item.ref, {
-                  status,
-                  reviewedAt: serverTimestamp(),
-                  reviewedBy: user.uid
-                });
+            try {
+              await updateDoc(item.ref, {
+                status,
+                reviewedAt: serverTimestamp(),
+                reviewedBy: user.uid
+              });
 
-                if (status === "approved") {
-                  await updateUserStatus(
-                    data.uid,
-                    "active"
-                  );
-                }
-
-                toast("Status banding diperbarui.");
-
-              } catch (error) {
-                logFirebaseError(
-                  "UPDATE APPEAL ERROR",
-                  error
-                );
-
-                toast(error.message, "error");
+              if (status === "approved") {
+                await updateUserStatus(data.uid, "active");
               }
-            };
-          }
-        );
+
+              toast("Status banding diperbarui.");
+            } catch (error) {
+              logFirebaseError("UPDATE APPEAL ERROR", error);
+              toast(error.message, "error");
+            }
+          };
+        });
 
         container.appendChild(card);
       });
 
       if (!container.children.length) {
-        container.innerHTML = `
-          <div class="empty-list">
-            Belum ada permohonan banding.
-          </div>
-        `;
+        container.innerHTML = `<div class="empty-list">Belum ada permohonan banding.</div>`;
       }
     },
-
     error => {
       logFirebaseError("LOAD APPEALS ERROR", error);
-
-      toast(
-        "Gagal memuat banding: " + error.message,
-        "error"
-      );
+      toast("Gagal memuat banding: " + error.message, "error");
     }
   );
 }
 
 function openAdmin() {
-  if (user.uid !== ADMIN_UID) return;
+  if (!isAdmin()) return;
 
   openModal("adminScreen");
-
   listenAppeals();
 }
 
@@ -2534,16 +2127,9 @@ function openAdmin() {
 // =====================================
 
 async function logout() {
-  cleanupConversation();
-
-  if (chatListUnsubscribe) chatListUnsubscribe();
-  if (groupUnsubscribe) groupUnsubscribe();
-  if (channelUnsubscribe) channelUnsubscribe();
-  if (statusUnsubscribe) statusUnsubscribe();
-  if (appealUnsubscribe) appealUnsubscribe();
+  cleanupAllListeners();
 
   await setPresence("offline").catch(() => {});
-
   await signOut(auth);
 }
 
@@ -2585,10 +2171,8 @@ async function enterApp() {
   }
 
   showOnly("appScreen");
-
   updateProfileUI();
 
-  // Hidden chats.
   try {
     await loadHiddenChats();
   } catch (error) {
@@ -2596,14 +2180,12 @@ async function enterApp() {
     hiddenChats.clear();
   }
 
-  // Presence.
   try {
     await setPresence("online");
   } catch (error) {
     logFirebaseError("SET PRESENCE ERROR", error);
   }
 
-  // Listeners.
   listenChats();
   listenGroups();
   listenChannels();
@@ -2619,38 +2201,17 @@ async function enterApp() {
 function cleanupAllListeners() {
   cleanupConversation();
 
-  [
-    "chatListUnsubscribe",
-    "groupUnsubscribe",
-    "channelUnsubscribe",
-    "statusUnsubscribe",
-    "appealUnsubscribe"
-  ].forEach(key => {
-    if (key === "chatListUnsubscribe" && chatListUnsubscribe) {
-      chatListUnsubscribe();
-      chatListUnsubscribe = null;
-    }
+  if (chatListUnsubscribe) chatListUnsubscribe();
+  if (groupUnsubscribe) groupUnsubscribe();
+  if (channelUnsubscribe) channelUnsubscribe();
+  if (statusUnsubscribe) statusUnsubscribe();
+  if (appealUnsubscribe) appealUnsubscribe();
 
-    if (key === "groupUnsubscribe" && groupUnsubscribe) {
-      groupUnsubscribe();
-      groupUnsubscribe = null;
-    }
-
-    if (key === "channelUnsubscribe" && channelUnsubscribe) {
-      channelUnsubscribe();
-      channelUnsubscribe = null;
-    }
-
-    if (key === "statusUnsubscribe" && statusUnsubscribe) {
-      statusUnsubscribe();
-      statusUnsubscribe = null;
-    }
-
-    if (key === "appealUnsubscribe" && appealUnsubscribe) {
-      appealUnsubscribe();
-      appealUnsubscribe = null;
-    }
-  });
+  chatListUnsubscribe = null;
+  groupUnsubscribe = null;
+  channelUnsubscribe = null;
+  statusUnsubscribe = null;
+  appealUnsubscribe = null;
 }
 
 // =====================================
@@ -2681,7 +2242,6 @@ async function initialize() {
   $("emailLoginTab").onclick = () => {
     $("emailLoginTab").classList.add("active");
     $("phoneLoginTab").classList.remove("active");
-
     $("emailLoginPanel").hidden = false;
     $("phoneLoginPanel").hidden = true;
   };
@@ -2689,7 +2249,6 @@ async function initialize() {
   $("phoneLoginTab").onclick = () => {
     $("phoneLoginTab").classList.add("active");
     $("emailLoginTab").classList.remove("active");
-
     $("phoneLoginPanel").hidden = false;
     $("emailLoginPanel").hidden = true;
   };
@@ -2727,7 +2286,6 @@ async function initialize() {
       }
 
       await enterApp();
-
     } catch (error) {
       toast(error.message, "error");
     }
@@ -2739,7 +2297,6 @@ async function initialize() {
   // Search.
   $("searchUser").addEventListener("input", () => {
     clearTimeout(searchTimer);
-
     searchTimer = setTimeout(searchUsers, 350);
   });
 
@@ -2751,25 +2308,22 @@ async function initialize() {
   // Messaging.
   $("sendBtn").onclick = sendMessage;
 
-  $("messageInput").addEventListener(
-    "keydown",
-    event => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        sendMessage();
-      }
+  $("messageInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      sendMessage();
     }
-  );
+  });
 
-  $("messageInput").addEventListener(
-    "input",
-    () => updateTyping(true)
-  );
+  $("messageInput").addEventListener("input", () => {
+    updateTyping(true).catch(error => {
+      console.warn("TYPING UPDATE ERROR:", error);
+    });
+  });
 
-  $("messageInput").addEventListener(
-    "blur",
-    () => updateTyping(false)
-  );
+  $("messageInput").addEventListener("blur", () => {
+    updateTyping(false).catch(() => {});
+  });
 
   // Chat controls.
   $("backToChats").onclick = closeChat;
@@ -2780,51 +2334,40 @@ async function initialize() {
   $("createGroupBtn").onclick = createGroup;
   $("createChannelBtn").onclick = createChannel;
 
-  $("createStatusBtn").onclick = () => {
-    openModal("statusModal");
-  };
-
+  $("createStatusBtn").onclick = () => openModal("statusModal");
   $("publishStatus").onclick = createStatus;
 
   // Profile.
-  $("editProfileBtn").onclick = () => {
-    openModal("profileModal");
-  };
-
-  $("profileBtn").onclick = () => {
-    openModal("profileModal");
-  };
-
+  $("editProfileBtn").onclick = () => openModal("profileModal");
+  $("profileBtn").onclick = () => openModal("profileModal");
   $("saveProfile").onclick = saveProfile;
 
   // Close modals.
-  $("closeProfile").onclick = () => {
-    closeModal("profileModal");
-  };
+  $("closeProfile").onclick = () => closeModal("profileModal");
+  $("closeStatus").onclick = () => closeModal("statusModal");
+  $("closeViewStatus").onclick = () => closeModal("viewStatusModal");
 
-  $("closeStatus").onclick = () => {
-    closeModal("statusModal");
-  };
+  $("linkPhoneBtn").onclick = () => openModal("linkPhoneModal");
+  $("closeLinkPhone").onclick = () => closeModal("linkPhoneModal");
 
-  $("closeViewStatus").onclick = () => {
-    closeModal("viewStatusModal");
-  };
+  // Tombol hapus status.
+  let deleteStatusBtn = $("deleteStatusBtn");
 
-  $("linkPhoneBtn").onclick = () => {
-    openModal("linkPhoneModal");
-  };
+  if (!deleteStatusBtn) {
+    deleteStatusBtn = document.createElement("button");
+    deleteStatusBtn.id = "deleteStatusBtn";
+    deleteStatusBtn.type = "button";
+    deleteStatusBtn.className = "danger-btn";
+    deleteStatusBtn.textContent = "Hapus Status";
 
-  $("closeLinkPhone").onclick = () => {
-    closeModal("linkPhoneModal");
-  };
+    $("viewStatusModal").appendChild(deleteStatusBtn);
+  }
+
+  deleteStatusBtn.onclick = deleteStatus;
 
   // Admin.
   $("openAdmin").onclick = openAdmin;
-
-  $("closeAdmin").onclick = () => {
-    closeModal("adminScreen");
-  };
-
+  $("closeAdmin").onclick = () => closeModal("adminScreen");
   $("findAdminUser").onclick = findAdminUser;
 
   // Navigation.
@@ -2859,15 +2402,10 @@ async function initialize() {
 
     try {
       await enterApp();
-
     } catch (error) {
       logFirebaseError("ENTER APP ERROR", error);
 
-      toast(
-        "Gagal membuka aplikasi: " + error.message,
-        "error"
-      );
-
+      toast("Gagal membuka aplikasi: " + error.message, "error");
       showOnly("authScreen");
     }
   });
