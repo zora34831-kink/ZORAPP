@@ -1498,6 +1498,7 @@ async function logout() {
 }
 
 async function enterApp() {
+async function enterApp() {
   profile = await loadProfile(user.uid);
 
   if (!profile) {
@@ -1506,6 +1507,7 @@ async function enterApp() {
       openModal("phoneProfileModal");
       return;
     }
+
     throw new Error("Profil akun tidak ditemukan.");
   }
 
@@ -1532,8 +1534,19 @@ async function enterApp() {
   showOnly("appScreen");
   updateProfileUI();
 
-  await loadHiddenChats();
-  await setPresence("online");
+  // Jangan biarkan fitur tambahan menggagalkan pembukaan aplikasi.
+  try {
+    await loadHiddenChats();
+  } catch (error) {
+    console.warn("Hidden chats:", error);
+    hiddenChats.clear();
+  }
+
+  try {
+    await setPresence("online");
+  } catch (error) {
+    console.warn("Presence:", error);
+  }
 
   listenChats();
   listenGroups();
