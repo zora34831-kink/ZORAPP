@@ -3323,3 +3323,128 @@ button {
     font-size: 9px;
   }
 }
+
+
+/* ==========================================
+   ZORAAPP — CLICK & LAYER REPAIR
+========================================== */
+
+/* Pastikan tombol dan kontrol bisa menerima sentuhan */
+button,
+input,
+textarea,
+label,
+select,
+.nav-button,
+.chat-item,
+.user-item,
+.attach-button,
+.photo-upload-button {
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+/* Jangan biarkan toast menghalangi tombol */
+.toast {
+  pointer-events: none !important;
+}
+
+/* Layer utama */
+.app {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-header {
+  position: relative;
+  z-index: 40;
+}
+
+.main-layout {
+  position: relative;
+  isolation: isolate;
+  z-index: 1;
+}
+
+/* Area percakapan */
+.conversation-area {
+  z-index: 10;
+}
+
+.conversation-area[hidden] {
+  display: none !important;
+}
+
+/* Navigasi HP */
+.mobile-nav {
+  z-index: 1000 !important;
+  pointer-events: auto !important;
+}
+
+.mobile-nav button {
+  position: relative;
+  z-index: 1001;
+  pointer-events: auto !important;
+}
+
+/* Modal hanya aktif ketika memang ditampilkan */
+.modal[hidden],
+.zora-modal[hidden],
+.zora-dialog-overlay[hidden] {
+  display: none !important;
+}
+
+.modal:not([hidden]),
+.zora-modal:not([hidden]),
+.zora-dialog-overlay:not([hidden]) {
+  pointer-events: auto;
+}
+
+.modal-card,
+.zora-modal-card,
+.zora-dialog-card {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+/* Pastikan elemen tersembunyi tidak menutupi layar */
+[hidden] {
+  display: none !important;
+}
+
+/* Perbaikan area login */
+.auth-screen {
+  position: relative;
+  z-index: 2;
+}
+
+.auth-card {
+  position: relative;
+  z-index: 3;
+}
+
+/* Perbaikan tampilan HP */
+@media (max-width: 800px) {
+  .app.chat-open .conversation-area {
+    display: block;
+    z-index: 30;
+    bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+  }
+
+  .app.chat-open .mobile-nav {
+    display: flex !important;
+    z-index: 1000 !important;
+  }
+
+  .content-area {
+    position: relative;
+    z-index: 1;
+  }
+
+  .conversation-area button,
+  .conversation-area input,
+  .conversation-area label {
+    pointer-events: auto !important;
+  }
+}
