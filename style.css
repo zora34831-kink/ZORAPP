@@ -2309,3 +2309,148 @@ button {
   flex-shrink: 0;
   letter-spacing: normal;
 }
+
+
+/* ======================================
+   ZORAAPP - CHANNEL LIST FIX
+====================================== */
+
+.channel-item-details {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  gap: 3px !important;
+}
+
+.channel-item-details > .channel-name {
+  display: block !important;
+  width: 100% !important;
+  margin: 0 !important;
+  font-size: 14px !important;
+  line-height: 1.35 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.channel-item-details > .channel-followers {
+  display: block !important;
+  width: 100% !important;
+  margin: 0 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
+  letter-spacing: .25px;
+  opacity: .75;
+  white-space: nowrap !important;
+}
+
+.channel-item-details > .channel-description {
+  display: block !important;
+  width: 100% !important;
+  margin: 0 !important;
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+  opacity: .65;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.channel-follow-btn {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 65px !important;
+  padding: 9px 12px !important;
+  font-size: 11px !important;
+}
+
+/* ======================================
+   ZORAAPP - PRESENCE UNDER NAME
+====================================== */
+
+.conversation-header {
+  min-width: 0;
+}
+
+.conversation-user {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+  gap: 3px !important;
+}
+
+.conversation-user #chatName {
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-presence {
+  display: block !important;
+  width: 100%;
+  margin: 0 !important;
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+  opacity: .7;
+}
+
+.chat-presence.is-online {
+  color: #20bd83 !important;
+  opacity: 1;
+}
+
+/* ======================================
+   ZORAAPP - MESSAGE LAYOUT
+====================================== */
+
+.message-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.message-ticks {
+  flex-shrink: 0;
+  letter-spacing: normal;
+}
+
+.chat-item-details {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.chat-item-details strong,
+.chat-item-details small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 800px) {
+  .channel-item-details {
+    min-width: 0 !important;
+  }
+
+  .channel-follow-btn {
+    min-width: 58px !important;
+    padding: 8px 10px !important;
+  }
+
+  .conversation-user {
+    max-width: calc(100vw - 150px);
+  }
+}
