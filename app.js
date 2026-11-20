@@ -1,4 +1,3 @@
-
 import { auth, db, storage, rtdb } from "./firebase.js";
 
 import {
@@ -18,7 +17,6 @@ import {
   getDoc,
   setDoc,
   updateDoc,
-  deleteDoc,
   collection,
   addDoc,
   getDocs,
@@ -29,8 +27,7 @@ import {
   serverTimestamp,
   limit,
   runTransaction,
-  arrayUnion,
-  arrayRemove
+  arrayUnion
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
 
 import {
@@ -48,100 +45,97 @@ import {
   serverTimestamp as rtdbTimestamp
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-database.js";
 
-
-/* ==================================================
+/* =========================================
    CONFIGURATION
-================================================== */
+========================================= */
 
 const ADMIN_UID = "PbeBf6CtGLVWvX2RqnuvXBWyePG2";
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
-const MESSAGE_LIMIT = 100;
-
-let currentUser = null;
-let currentProfile = null;
-let activeConversation = null;
-let activeConversationType = null;
-
-let confirmationResult = null;
-let recaptchaVerifier = null;
-let linkConfirmation = null;
-let linkRecaptcha = null;
-
-let listeners = [];
-let conversationListeners = [];
-let presenceListener = null;
-let typingTimer = null;
-let toastTimer = null;
-let searchDelay = null;
-
-let busy = false;
-let pendingProfilePromise = null;
-
-
-/* ==================================================
-   DOM HELPERS
-================================================== */
+const MAX_IMAGE = 5 * 1024 * 1024;
 
 const $ = id => document.getElementById(id);
 
-function on(id, event, callback) {
-  $(id)?.addEventListener(event, callback);
-}
+let user = null;
+let profile = null;
 
-function show(element) {
-  if (element) element.hidden = false;
-}
+let activeId = null;
+let activeType = null;
 
-function hide(element) {
-  if (element) element.hidden = true;
-}
+let otpResult = null;
+let linkResult = null;
 
-function errorText(id, message = "") {
-  if ($(id)) $(id).textContent = message;
-}
+let recaptcha = null;
+let linkCaptcha = null;
 
-function escapeHTML(value = "") {
-  return String(value).replace(/[&<>"']/g, char => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;"
-  })[char]);
-}
+let rootUnsubs = [];
+let chatUnsubs = [];
+
+let presenceUnsub = null;
+
+let busy = false;
+let toastTimer = null;
+let searchTimer = null;
+let profilePromise = null;
+let typingTimer = null;
+
+const on = (id, event, fn) => {
+  $(id)?.addEventListener(event, fn);
+};
+
+const show = el => {
+  if (el) el.hidden = false;
+};
+
+const hide = el => {
+  if (el) el.hidden = true;
+};
+
+const msg = (id, value = "") => {
+  if ($(id)) $(id).textContent = value;
+};
+
+/* =========================================
+   UTILITIES
+========================================= */
 
 function toast(message) {
-  const element = $("toast");
-  if (!element) return;
+  const el = $("toast");
+  if (!el) return;
 
-  element.textContent = message;
-  element.classList.add("show");
+  el.textContent = message;
+  el.classList.add("show");
 
   clearTimeout(toastTimer);
 
   toastTimer = setTimeout(() => {
-    element.classList.remove("show");
+    el.classList.remove("show");
   }, 2800);
 }
 
-function setBusy(button, state, text) {
+function setBusy(button, state, label = "MEMPROSES...") {
   if (!button) return;
 
   button.disabled = state;
 
   if (state) {
-    if (!button.dataset.oldText) {
-      button.dataset.oldText = button.textContent;
-    }
-
-    button.textContent = text || "MEMPROSES...";
+    button.dataset.oldText ??= button.textContent;
+    button.textContent = label;
   } else {
-    button.textContent = button.dataset.oldText || text || "LANJUTKAN";
+    button.textContent = button.dataset.oldText || button.textContent;
     delete button.dataset.oldText;
   }
 }
 
-function authErrorMessage(error) {
+function esc(value = "") {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function authError(error) {
   const messages = {
     "auth/invalid-email": "Format email tidak valid.",
     "auth/user-not-found": "Akun tidak ditemukan.",
@@ -153,127 +147,231 @@ function authErrorMessage(error) {
     "auth/too-many-requests": "Terlalu banyak percobaan. Coba lagi nanti.",
     "auth/operation-not-allowed": "Metode login belum diaktifkan di Firebase.",
     "auth/invalid-phone-number": "Nomor HP tidak valid.",
-    "auth/quota-exceeded": "Kuota SMS Firebase sudah tercapai.",
+    "auth/quota-exceeded": "Kuota SMS Firebase tercapai.",
     "auth/captcha-check-failed": "Verifikasi reCAPTCHA gagal.",
     "auth/invalid-verification-code": "Kode OTP salah.",
     "auth/code-expired": "Kode OTP kedaluwarsa.",
-    "auth/session-expired": "Sesi OTP berakhir. Kirim kode kembali.",
     "auth/credential-already-in-use": "Nomor HP sudah terhubung ke akun lain.",
-    "auth/provider-already-linked": "Nomor HP sudah terhubung.",
-    "auth/invalid-verification-id": "Sesi verifikasi tidak valid."
+    "auth/provider-already-linked": "Nomor HP sudah terhubung."
   };
 
   return messages[error?.code] || error?.message || "Terjadi kesalahan.";
 }
 
+function normalizePhone(value) {
+  let phone = String(value || "").replace(/[\s()-]/g, "");
 
-/* ==================================================
-   AUTH SCREEN
-================================================== */
+  if (phone.startsWith("08")) {
+    phone = "+62" + phone.slice(1);
+  } else if (phone.startsWith("8")) {
+    phone = "+62" + phone;
+  }
+
+  return phone;
+}
+
+function stamp(value) {
+  if (!value) return 0;
+
+  if (typeof value.toMillis === "function") {
+    return value.toMillis();
+  }
+
+  if (typeof value.toDate === "function") {
+    return value.toDate().getTime();
+  }
+
+  return new Date(value).getTime() || 0;
+}
+
+/* =========================================
+   SCREEN MANAGEMENT
+========================================= */
 
 function showAuth() {
   show($("authScreen"));
   hide($("appScreen"));
-  hide($("holdScreen"));
-  hide($("recoveredScreen"));
-  hide($("permanentScreen"));
+
+  [
+    "holdScreen",
+    "recoveredScreen",
+    "permanentScreen"
+  ].forEach(id => hide($(id)));
 }
 
 function showApp() {
   hide($("authScreen"));
-  hide($("holdScreen"));
-  hide($("recoveredScreen"));
-  hide($("permanentScreen"));
+
+  [
+    "holdScreen",
+    "recoveredScreen",
+    "permanentScreen"
+  ].forEach(id => hide($(id)));
+
   show($("appScreen"));
 }
+
+function showAccountStatus(status) {
+  [
+    "appScreen",
+    "authScreen",
+    "holdScreen",
+    "recoveredScreen",
+    "permanentScreen"
+  ].forEach(id => hide($(id)));
+
+  if (status === "hold") {
+    show($("holdScreen"));
+  } else if (status === "permanent") {
+    show($("permanentScreen"));
+  } else {
+    show($("recoveredScreen"));
+  }
+}
+
+/* =========================================
+   LISTENER MANAGEMENT
+========================================= */
+
+function clearChatListeners() {
+  chatUnsubs.forEach(unsubscribe => {
+    try {
+      unsubscribe();
+    } catch {}
+  });
+
+  chatUnsubs = [];
+
+  if (presenceUnsub) {
+    presenceUnsub();
+    presenceUnsub = null;
+  }
+
+  if (activeId && activeType && user) {
+    stopTyping(activeId, activeType).catch(() => {});
+  }
+}
+
+function clearListeners() {
+  clearChatListeners();
+
+  rootUnsubs.forEach(unsubscribe => {
+    try {
+      unsubscribe();
+    } catch {}
+  });
+
+  rootUnsubs = [];
+}
+
+function listen(unsubscribe, chat = false) {
+  if (typeof unsubscribe !== "function") return;
+
+  if (chat) {
+    chatUnsubs.push(unsubscribe);
+  } else {
+    rootUnsubs.push(unsubscribe);
+  }
+}
+
+/* =========================================
+   LOGIN TAB
+========================================= */
 
 function switchLoginTab(type) {
   const email = type === "email";
 
-  if ($("emailLoginPanel")) {
-    $("emailLoginPanel").hidden = !email;
-  }
+  $("emailLoginPanel").hidden = !email;
+  $("phoneLoginPanel").hidden = email;
 
-  if ($("phoneLoginPanel")) {
-    $("phoneLoginPanel").hidden = email;
-  }
+  $("emailLoginTab").classList.toggle("active", email);
+  $("phoneLoginTab").classList.toggle("active", !email);
 
-  $("emailLoginTab")?.classList.toggle("active", email);
-  $("phoneLoginTab")?.classList.toggle("active", !email);
-
-  errorText("authError");
+  msg("authError");
 }
 
-on("emailLoginTab", "click", () => switchLoginTab("email"));
-on("phoneLoginTab", "click", () => switchLoginTab("phone"));
+on("emailLoginTab", "click", () => {
+  switchLoginTab("email");
+});
 
+on("phoneLoginTab", "click", () => {
+  switchLoginTab("phone");
+});
 
-/* ==================================================
+on("showRegister", "click", () => {
+  hide($("loginMode"));
+  show($("registerMode"));
+
+  msg("authError");
+  msg("registerError");
+});
+
+on("showLogin", "click", () => {
+  hide($("registerMode"));
+  show($("loginMode"));
+
+  msg("authError");
+  msg("registerError");
+});
+
+/* =========================================
    EMAIL LOGIN
-================================================== */
+========================================= */
 
-async function handleLogin() {
+on("loginBtn", "click", async () => {
   if (busy) return;
 
-  const email = $("authEmail")?.value.trim();
-  const password = $("authPassword")?.value;
+  const email = $("authEmail").value.trim();
+  const password = $("authPassword").value;
 
   if (!email || !password) {
-    errorText("authError", "Masukkan email dan password.");
-    return;
+    return msg("authError", "Masukkan email dan password.");
   }
 
   busy = true;
+
   setBusy($("loginBtn"), true, "SEDANG MASUK...");
-  errorText("authError");
+  msg("authError");
 
   try {
     await signInWithEmailAndPassword(auth, email, password);
   } catch (error) {
-    console.error("Login error:", error);
-    errorText("authError", authErrorMessage(error));
+    msg("authError", authError(error));
   } finally {
     busy = false;
     setBusy($("loginBtn"), false);
   }
-}
+});
 
-on("loginBtn", "click", handleLogin);
+/* =========================================
+   REGISTER
+========================================= */
 
-
-/* ==================================================
-   REGISTRATION
-================================================== */
-
-async function handleRegister() {
+on("registerBtn", "click", async () => {
   if (busy) return;
 
-  const name = $("authName")?.value.trim();
-  const username = $("registerUsername")?.value.trim().toLowerCase();
-  const email = $("registerEmail")?.value.trim();
-  const password = $("registerPassword")?.value;
+  const name = $("authName").value.trim();
+  const username = $("registerUsername").value.trim().toLowerCase();
+  const email = $("registerEmail").value.trim();
+  const password = $("registerPassword").value;
 
   if (!name || !username || !email || !password) {
-    errorText("registerError", "Lengkapi semua kolom.");
-    return;
+    return msg("registerError", "Lengkapi semua kolom.");
   }
 
   if (!/^[a-z0-9_]{3,20}$/.test(username)) {
-    errorText(
+    return msg(
       "registerError",
-      "Username 3–20 karakter, hanya huruf, angka, dan underscore."
+      "Username 3–20 karakter, huruf kecil, angka, underscore."
     );
-    return;
   }
 
   if (password.length < 8) {
-    errorText("registerError", "Password minimal 8 karakter.");
-    return;
+    return msg("registerError", "Password minimal 8 karakter.");
   }
 
   busy = true;
   setBusy($("registerBtn"), true, "MEMBUAT AKUN...");
-  errorText("registerError");
 
   let createdUser = null;
 
@@ -292,12 +390,12 @@ async function handleRegister() {
 
     await runTransaction(db, async transaction => {
       const usernameRef = doc(db, "usernames", username);
-      const userRef = doc(db, "users", createdUser.uid);
+      const profileRef = doc(db, "users", createdUser.uid);
 
       const usernameSnap = await transaction.get(usernameRef);
 
       if (usernameSnap.exists()) {
-        throw new Error("Username sudah digunakan.");
+        throw Error("Username sudah digunakan.");
       }
 
       transaction.set(usernameRef, {
@@ -306,7 +404,7 @@ async function handleRegister() {
         createdAt: serverTimestamp()
       });
 
-      transaction.set(userRef, {
+      transaction.set(profileRef, {
         uid: createdUser.uid,
         name,
         username,
@@ -322,236 +420,220 @@ async function handleRegister() {
     });
 
     toast("Akun berhasil dibuat.");
-
   } catch (error) {
-    console.error("Registration error:", error);
+    console.error(error);
+
+    msg("registerError", authError(error));
 
     if (createdUser) {
       try {
         await signOut(auth);
-      } catch (signOutError) {
-        console.warn("Sign out after registration error:", signOutError);
-      }
+      } catch {}
     }
-
-    errorText(
-      "registerError",
-      error.message || authErrorMessage(error)
-    );
-
   } finally {
     busy = false;
     setBusy($("registerBtn"), false);
   }
-}
+});
 
-on("registerBtn", "click", handleRegister);
-
-
-/* ==================================================
-   PASSWORD RESET
-================================================== */
+/* =========================================
+   FORGOT PASSWORD
+========================================= */
 
 on("forgotPassword", "click", async () => {
-  const email = $("authEmail")?.value.trim();
+  const email = $("authEmail").value.trim();
 
   if (!email) {
-    errorText("authError", "Masukkan email terlebih dahulu.");
-    return;
+    return msg("authError", "Masukkan email terlebih dahulu.");
   }
 
   try {
     await sendPasswordResetEmail(auth, email);
     toast("Link reset password dikirim ke email.");
   } catch (error) {
-    errorText("authError", authErrorMessage(error));
+    msg("authError", authError(error));
   }
 });
 
+/* =========================================
+   PHONE OTP
+========================================= */
 
-/* ==================================================
-   PHONE NUMBER HELPERS
-================================================== */
-
-function normalizePhone(value) {
-  let phone = String(value || "").replace(/[\s()-]/g, "");
-
-  if (phone.startsWith("08")) {
-    phone = "+62" + phone.slice(1);
-  } else if (phone.startsWith("8")) {
-    phone = "+62" + phone;
-  }
-
-  return phone;
-}
-
-function resetRecaptcha() {
+function clearCaptcha(link = false) {
   try {
-    recaptchaVerifier?.clear();
-  } catch (error) {
-    console.warn("reCAPTCHA cleanup:", error);
-  }
+    (link ? linkCaptcha : recaptcha)?.clear();
+  } catch {}
 
-  recaptchaVerifier = null;
+  if (link) {
+    linkCaptcha = null;
+  } else {
+    recaptcha = null;
+  }
 }
 
-function resetLinkRecaptcha() {
-  try {
-    linkRecaptcha?.clear();
-  } catch (error) {
-    console.warn("Link reCAPTCHA cleanup:", error);
+function makeCaptcha(id) {
+  if (!$(id)) {
+    throw Error("Elemen reCAPTCHA tidak ditemukan.");
   }
 
-  linkRecaptcha = null;
-}
-
-function createRecaptcha(containerId) {
-  const container = $(containerId);
-
-  if (!container) {
-    throw new Error(`Elemen ${containerId} tidak ditemukan di HTML.`);
-  }
-
-  return new RecaptchaVerifier(auth, containerId, {
+  return new RecaptchaVerifier(auth, id, {
     size: "normal",
-    callback: () => {
-      console.log("reCAPTCHA verified");
-    },
+    callback: () => {},
     "expired-callback": () => {
-      toast("reCAPTCHA kedaluwarsa. Silakan coba lagi.");
+      toast("reCAPTCHA kedaluwarsa. Coba lagi.");
     }
   });
 }
 
-
-/* ==================================================
-   PHONE OTP LOGIN
-================================================== */
-
-async function sendPhoneOtp() {
+on("sendPhoneOtp", "click", async () => {
   if (busy) return;
 
-  const phone = normalizePhone($("phoneNumber")?.value);
+  const phone = normalizePhone($("phoneNumber").value);
 
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-    errorText(
-      "authError",
-      "Gunakan format nomor internasional, contoh +6281234567890."
-    );
-    return;
+    return msg("authError", "Gunakan format +6281234567890.");
   }
 
   busy = true;
+
   setBusy($("sendPhoneOtp"), true, "MENGIRIM SMS...");
-  errorText("authError");
 
   try {
-    resetRecaptcha();
+    clearCaptcha();
 
-    recaptchaVerifier = createRecaptcha("recaptcha-container");
+    recaptcha = makeCaptcha("recaptcha-container");
 
-    confirmationResult = await signInWithPhoneNumber(
+    otpResult = await signInWithPhoneNumber(
       auth,
       phone,
-      recaptchaVerifier
+      recaptcha
     );
 
     $("phoneNumber").readOnly = true;
+
     show($("otpPanel"));
 
+    msg("authError");
     toast("Kode OTP dikirim melalui SMS.");
-
   } catch (error) {
-    console.error("OTP send error:", error);
+    console.error(error);
 
-    resetRecaptcha();
-    confirmationResult = null;
+    clearCaptcha();
+    otpResult = null;
 
-    errorText("authError", authErrorMessage(error));
-
+    msg("authError", authError(error));
   } finally {
     busy = false;
     setBusy($("sendPhoneOtp"), false);
   }
-}
+});
 
-on("sendPhoneOtp", "click", sendPhoneOtp);
+on("verifyPhoneOtp", "click", async () => {
+  if (!otpResult || busy) return;
 
+  const code = $("phoneOtp").value.trim();
 
-/* ==================================================
-   PHONE PROFILE CREATION
-================================================== */
-
-let pendingPhoneUser = null;
-
-function ensurePhoneProfile(user) {
-  if (pendingProfilePromise) {
-    return pendingProfilePromise;
+  if (!/^\d{6}$/.test(code)) {
+    return msg("authError", "Masukkan kode OTP 6 digit.");
   }
 
-  pendingPhoneUser = user;
+  busy = true;
 
-  pendingProfilePromise = new Promise(resolve => {
+  setBusy($("verifyPhoneOtp"), true, "MEMVERIFIKASI...");
+
+  try {
+    await otpResult.confirm(code);
+
+    otpResult = null;
+    clearCaptcha();
+
+    toast("Nomor HP berhasil diverifikasi.");
+  } catch (error) {
+    msg("authError", authError(error));
+  } finally {
+    busy = false;
+    setBusy($("verifyPhoneOtp"), false);
+  }
+});
+
+on("resendPhoneOtp", "click", () => {
+  $("phoneNumber").readOnly = false;
+  $("phoneOtp").value = "";
+
+  hide($("otpPanel"));
+
+  otpResult = null;
+  clearCaptcha();
+
+  $("sendPhoneOtp").click();
+});
+
+/* =========================================
+   PHONE PROFILE
+========================================= */
+
+async function ensurePhoneProfile(currentUser) {
+  if (profilePromise) return profilePromise;
+
+  profilePromise = new Promise(resolve => {
     const modal = $("phoneProfileModal");
     const button = $("completePhoneProfile");
 
     if (!modal || !button) {
-      pendingProfilePromise = null;
+      profilePromise = null;
       resolve(false);
-      throw new Error("Modal profil nomor HP tidak ditemukan di HTML.");
+      return;
     }
 
-    show($("authScreen"));
     show(modal);
-
-    errorText("phoneProfileError");
+    msg("phoneProfileError");
 
     button.onclick = async () => {
-      if (busy) return;
+      const name = $("phoneProfileName").value.trim();
 
-      const name = $("phoneProfileName")?.value.trim();
-      const username = $("phoneProfileUsername")?.value.trim().toLowerCase();
+      const username = $("phoneProfileUsername")
+        .value.trim()
+        .toLowerCase();
 
-      if (!name || !/^[a-z0-9_]{3,20}$/.test(username || "")) {
-        errorText(
+      if (!name || !/^[a-z0-9_]{3,20}$/.test(username)) {
+        return msg(
           "phoneProfileError",
-          "Isi nama dan username 3–20 karakter (huruf, angka, underscore)."
+          "Isi nama dan username valid (3–20 karakter)."
         );
-        return;
       }
 
+      if (busy) return;
+
       busy = true;
+
       setBusy(button, true, "MENYIMPAN...");
-      errorText("phoneProfileError");
 
       try {
         await runTransaction(db, async transaction => {
           const usernameRef = doc(db, "usernames", username);
-          const userRef = doc(db, "users", user.uid);
+          const profileRef = doc(db, "users", currentUser.uid);
 
           const usernameSnap = await transaction.get(usernameRef);
-          const userSnap = await transaction.get(userRef);
+          const profileSnap = await transaction.get(profileRef);
 
-          if (userSnap.exists()) {
-            return;
-          }
+          if (profileSnap.exists()) return;
 
           if (usernameSnap.exists()) {
-            throw new Error("Username sudah digunakan. Pilih username lain.");
+            throw Error("Username sudah digunakan.");
           }
 
           transaction.set(usernameRef, {
-            uid: user.uid,
+            uid: currentUser.uid,
             username,
             createdAt: serverTimestamp()
           });
 
-          transaction.set(userRef, {
-            uid: user.uid,
+          transaction.set(profileRef, {
+            uid: currentUser.uid,
             name,
             username,
-            email: user.email || "",
-            phoneNumber: user.phoneNumber || "",
+            email: currentUser.email || "",
+            phoneNumber: currentUser.phoneNumber || "",
             bio: "",
             photoURL: "",
             createdAt: serverTimestamp(),
@@ -561,32 +643,32 @@ function ensurePhoneProfile(user) {
           });
         });
 
-        await updateProfile(user, {
+        await updateProfile(currentUser, {
           displayName: name
         });
 
-        const profileSnap = await getDoc(doc(db, "users", user.uid));
+        const snap = await getDoc(
+          doc(db, "users", currentUser.uid)
+        );
 
-        if (!profileSnap.exists()) {
-          throw new Error("Profil belum berhasil dibuat. Coba lagi.");
+        if (!snap.exists()) {
+          throw Error("Profil belum tersimpan.");
         }
 
-        currentProfile = {
-          uid: user.uid,
-          ...profileSnap.data()
+        profile = {
+          uid: currentUser.uid,
+          ...snap.data()
         };
 
         hide(modal);
-        pendingPhoneUser = null;
 
-        const finish = resolve;
-        pendingProfilePromise = null;
-        finish(true);
-
+        profilePromise = null;
+        resolve(true);
       } catch (error) {
-        console.error("Phone profile:", error);
-        errorText("phoneProfileError", error.message || "Gagal menyimpan profil.");
-
+        msg(
+          "phoneProfileError",
+          error.message || authError(error)
+        );
       } finally {
         busy = false;
         setBusy(button, false);
@@ -594,145 +676,79 @@ function ensurePhoneProfile(user) {
     };
   });
 
-  return pendingProfilePromise;
+  return profilePromise;
 }
 
-
-/* ==================================================
-   VERIFY PHONE OTP
-================================================== */
-
-async function verifyPhoneOtp() {
-  if (!confirmationResult || busy) return;
-
-  const code = $("phoneOtp")?.value.trim();
-
-  if (!/^\d{6}$/.test(code || "")) {
-    errorText("authError", "Masukkan kode OTP 6 digit.");
-    return;
-  }
-
-  busy = true;
-  setBusy($("verifyPhoneOtp"), true, "MEMVERIFIKASI...");
-  errorText("authError");
-
-  try {
-    await confirmationResult.confirm(code);
-
-    confirmationResult = null;
-    resetRecaptcha();
-
-    toast("Nomor HP berhasil diverifikasi.");
-
-    /*
-      Pembuatan profil ditangani oleh onAuthStateChanged.
-      Jangan panggil ensurePhoneProfile di sini agar tidak
-      terjadi dua proses pembuatan profil secara bersamaan.
-    */
-
-  } catch (error) {
-    console.error("OTP verification error:", error);
-    errorText("authError", authErrorMessage(error));
-
-  } finally {
-    busy = false;
-    setBusy($("verifyPhoneOtp"), false);
-  }
-}
-
-on("verifyPhoneOtp", "click", verifyPhoneOtp);
-
-
-/* ==================================================
-   RESEND OTP
-================================================== */
-
-on("resendPhoneOtp", "click", async () => {
-  if (busy) return;
-
-  if ($("phoneNumber")) {
-    $("phoneNumber").readOnly = false;
-  }
-
-  if ($("phoneOtp")) {
-    $("phoneOtp").value = "";
-  }
-
-  hide($("otpPanel"));
-
-  confirmationResult = null;
-  resetRecaptcha();
-
-  await sendPhoneOtp();
-});
-
-
-/* ==================================================
-   PROFILE DATA
-================================================== */
+/* =========================================
+   PROFILE
+========================================= */
 
 async function loadProfile(uid) {
-  const snapshot = await getDoc(doc(db, "users", uid));
+  const snap = await getDoc(doc(db, "users", uid));
 
-  if (!snapshot.exists()) {
-    throw new Error("Profil pengguna belum tersedia.");
+  if (!snap.exists()) {
+    throw Error("Profil pengguna belum tersedia.");
   }
 
-  currentProfile = {
+  profile = {
     uid,
-    ...snapshot.data()
+    ...snap.data()
   };
 
-  return currentProfile;
+  return profile;
+}
+
+function avatar(name = "U", photo = "", extraClass = "") {
+  return `
+    <div class="avatar ${extraClass}"
+      ${photo ? `style="background-image:url('${esc(photo)}')"` : ""}>
+      ${photo ? "" : esc(name.charAt(0).toUpperCase())}
+    </div>
+  `;
 }
 
 function renderProfile() {
-  if (!currentProfile || !currentUser) return;
+  if (!profile || !user) return;
 
-  const name = currentProfile.name || "Pengguna";
-  const username = currentProfile.username || "";
-  const photo = currentProfile.photoURL || "";
+  const name = profile.name || "Pengguna";
+  const photo = profile.photoURL || "";
 
-  if ($("myName")) $("myName").textContent = name;
-  if ($("myEmail")) $("myEmail").textContent = currentProfile.email || "";
-  if ($("myPhone")) $("myPhone").textContent = currentProfile.phoneNumber || "";
+  if ($("myName")) {
+    $("myName").textContent = name;
+  }
+
+  if ($("myEmail")) {
+    $("myEmail").textContent = profile.email || "";
+  }
+
+  if ($("myPhone")) {
+    $("myPhone").textContent = profile.phoneNumber || "";
+  }
 
   if ($("myAvatar")) {
-    $("myAvatar").textContent = name.charAt(0).toUpperCase();
+    $("myAvatar").textContent = photo ? "" : name[0].toUpperCase();
+
     $("myAvatar").style.backgroundImage = photo
       ? `url("${photo}")`
       : "none";
-
-    $("myAvatar").classList.toggle("has-photo", Boolean(photo));
-  }
-
-  if ($("chatAvatar")) {
-    $("chatAvatar").textContent = name.charAt(0).toUpperCase();
   }
 
   if ($("openAdmin")) {
-    $("openAdmin").hidden = currentUser.uid !== ADMIN_UID;
+    $("openAdmin").hidden = user.uid !== ADMIN_UID;
   }
 
-  if ($("profileName")) $("profileName").value = name;
-  if ($("profileUsername")) $("profileUsername").value = username;
-  if ($("profileBio")) $("profileBio").value = currentProfile.bio || "";
+  $("profileName").value = name;
+  $("profileUsername").value = profile.username || "";
+  $("profileBio").value = profile.bio || "";
 
-  if ($("profilePhotoPreview")) {
-    $("profilePhotoPreview").textContent = photo
-      ? ""
-      : name.charAt(0).toUpperCase();
+  $("profilePhotoPreview").textContent = photo
+    ? ""
+    : name[0].toUpperCase();
 
-    $("profilePhotoPreview").style.backgroundImage = photo
-      ? `url("${photo}")`
-      : "none";
-  }
+  $("profilePhotoPreview").style.backgroundImage = photo
+    ? `url("${photo}")`
+    : "none";
 }
-
-
-/* ==================================================
-   PROFILE MODAL
-================================================== */
 
 on("profileBtn", "click", () => {
   renderProfile();
@@ -748,343 +764,269 @@ on("closeProfile", "click", () => {
   hide($("profileModal"));
 });
 
-
-/* ==================================================
+/* =========================================
    IMAGE UPLOAD
-================================================== */
+========================================= */
 
 async function uploadImage(file, folder) {
-  if (!currentUser) {
-    throw new Error("Kamu belum login.");
-  }
-
   if (!file || !file.type.startsWith("image/")) {
-    throw new Error("File harus berupa gambar.");
+    throw Error("File harus berupa gambar.");
   }
 
-  if (file.size > MAX_IMAGE_SIZE) {
-    throw new Error("Ukuran gambar maksimal 5 MB.");
+  if (file.size > MAX_IMAGE) {
+    throw Error("Ukuran gambar maksimal 5 MB.");
   }
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${folder}/${currentUser.uid}/${Date.now()}_${safeName}`;
-  const imageRef = storageRef(storage, path);
+  const path = `${folder}/${user.uid}/${Date.now()}_${file.name.replace(/[^\w.-]/g, "_")}`;
 
-  await uploadBytes(imageRef, file);
+  const reference = storageRef(storage, path);
 
-  return await getDownloadURL(imageRef);
+  await uploadBytes(reference, file);
+
+  return getDownloadURL(reference);
 }
 
 on("profilePhotoInput", "change", event => {
   const file = event.target.files?.[0];
 
-  if (!file || !$("profilePhotoPreview")) return;
+  if (!file) return;
 
-  if (!file.type.startsWith("image/")) {
-    toast("Pilih file gambar.");
+  if (!file.type.startsWith("image/") || file.size > MAX_IMAGE) {
+    toast("Pilih gambar maksimal 5 MB.");
     event.target.value = "";
     return;
   }
 
-  if (file.size > MAX_IMAGE_SIZE) {
-    toast("Ukuran gambar maksimal 5 MB.");
-    event.target.value = "";
-    return;
-  }
+  const url = URL.createObjectURL(file);
 
-  const previewURL = URL.createObjectURL(file);
-
-  $("profilePhotoPreview").style.backgroundImage =
-    `url("${previewURL}")`;
-
+  $("profilePhotoPreview").style.backgroundImage = `url("${url}")`;
   $("profilePhotoPreview").textContent = "";
 });
 
-
-/* ==================================================
-   SAVE PROFILE
-================================================== */
-
 on("saveProfile", "click", async () => {
-  if (busy || !currentUser || !currentProfile) return;
+  if (busy || !user || !profile) return;
 
-  const name = $("profileName")?.value.trim();
-  const bio = $("profileBio")?.value.trim();
+  const name = $("profileName").value.trim();
+  const bio = $("profileBio").value.trim();
 
   if (!name) {
-    toast("Nama tidak boleh kosong.");
-    return;
+    return toast("Nama tidak boleh kosong.");
   }
 
   busy = true;
+
   setBusy($("saveProfile"), true, "MENYIMPAN...");
 
   try {
-    let photoURL = currentProfile.photoURL || "";
+    let photoURL = profile.photoURL || "";
 
-    const file = $("profilePhotoInput")?.files?.[0];
+    const file = $("profilePhotoInput").files?.[0];
 
     if (file) {
       photoURL = await uploadImage(file, "profiles");
     }
 
-    await updateDoc(doc(db, "users", currentUser.uid), {
+    await updateDoc(doc(db, "users", user.uid), {
       name,
       bio,
       photoURL,
       updatedAt: serverTimestamp()
     });
 
-    await updateProfile(currentUser, {
+    await updateProfile(user, {
       displayName: name,
       photoURL
     });
 
-    await loadProfile(currentUser.uid);
+    await loadProfile(user.uid);
+
     renderProfile();
 
-    if ($("profilePhotoInput")) {
-      $("profilePhotoInput").value = "";
-    }
+    $("profilePhotoInput").value = "";
 
     hide($("profileModal"));
-    toast("Profil berhasil diperbarui.");
 
+    toast("Profil diperbarui.");
   } catch (error) {
-    console.error("Save profile:", error);
-    toast("Gagal menyimpan profil: " + error.message);
-
+    toast("Gagal menyimpan: " + error.message);
   } finally {
     busy = false;
     setBusy($("saveProfile"), false);
   }
 });
 
-
-/* ==================================================
-   LINK PHONE NUMBER TO EXISTING ACCOUNT
-================================================== */
+/* =========================================
+   LINK PHONE NUMBER
+========================================= */
 
 on("linkPhoneBtn", "click", () => {
   show($("linkPhoneModal"));
 });
 
+on("closeLinkPhone", "click", () => {
+  hide($("linkPhoneModal"));
+});
+
 on("sendLinkPhoneOtp", "click", async () => {
-  if (!currentUser) {
-    errorText("linkPhoneError", "Kamu belum login.");
-    return;
+  const phone = normalizePhone($("linkPhoneNumber").value);
+
+  if (!user) {
+    return msg("linkPhoneError", "Kamu belum login.");
   }
 
-  const phone = normalizePhone($("linkPhoneNumber")?.value);
-
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-    errorText("linkPhoneError", "Nomor HP tidak valid.");
-    return;
+    return msg("linkPhoneError", "Nomor HP tidak valid.");
   }
 
   try {
-    resetLinkRecaptcha();
+    clearCaptcha(true);
 
-    linkRecaptcha = createRecaptcha("link-recaptcha-container");
+    linkCaptcha = makeCaptcha("link-recaptcha-container");
 
-    /*
-      linkWithPhoneNumber mempertahankan akun yang sedang login.
-      signInWithPhoneNumber akan mencoba login sebagai akun baru.
-    */
-
-    linkConfirmation = await linkWithPhoneNumber(
-      currentUser,
+    linkResult = await linkWithPhoneNumber(
+      user,
       phone,
-      linkRecaptcha
+      linkCaptcha
     );
 
     show($("linkPhoneOtpPanel"));
-    errorText("linkPhoneError");
 
-    toast("SMS OTP untuk menautkan nomor berhasil dikirim.");
+    msg("linkPhoneError");
 
+    toast("SMS OTP dikirim.");
   } catch (error) {
-    console.error("Link phone send:", error);
-    errorText("linkPhoneError", authErrorMessage(error));
-    resetLinkRecaptcha();
+    msg("linkPhoneError", authError(error));
+    clearCaptcha(true);
   }
 });
 
-
-/* ==================================================
-   VERIFY LINK PHONE OTP
-================================================== */
-
 on("verifyLinkPhoneOtp", "click", async () => {
-  if (!linkConfirmation || !currentUser) return;
+  if (!linkResult || !user) return;
 
-  const code = $("linkPhoneOtp")?.value.trim();
+  const code = $("linkPhoneOtp").value.trim();
 
-  if (!/^\d{6}$/.test(code || "")) {
-    errorText("linkPhoneError", "Kode OTP harus 6 digit.");
-    return;
+  if (!/^\d{6}$/.test(code)) {
+    return msg("linkPhoneError", "Kode OTP harus 6 digit.");
   }
 
   try {
-    /*
-      Konfirmasi ini menautkan nomor ke akun yang sedang login.
-    */
+    const credential = await linkResult.confirm(code);
 
-    const credential = await linkConfirmation.confirm(code);
-    currentUser = credential.user;
+    user = credential.user;
 
-    await updateDoc(doc(db, "users", currentUser.uid), {
-      phoneNumber: currentUser.phoneNumber || "",
+    await updateDoc(doc(db, "users", user.uid), {
+      phoneNumber: user.phoneNumber || "",
       updatedAt: serverTimestamp()
     });
 
-    await loadProfile(currentUser.uid);
+    await loadProfile(user.uid);
+
     renderProfile();
 
-    linkConfirmation = null;
-    resetLinkRecaptcha();
+    linkResult = null;
+
+    clearCaptcha(true);
 
     hide($("linkPhoneModal"));
-    hide($("linkPhoneOtpPanel"));
 
     toast("Nomor HP berhasil ditautkan.");
-
   } catch (error) {
-    console.error("Link phone verify:", error);
-    errorText("linkPhoneError", authErrorMessage(error));
+    msg("linkPhoneError", authError(error));
   }
 });
 
-
-/* ==================================================
+/* =========================================
    LOGOUT
-================================================== */
+========================================= */
 
 async function logout() {
+  clearListeners();
+
+  if (user) {
+    await remove(
+      dbRef(rtdb, `status/${user.uid}`)
+    ).catch(() => {});
+  }
+
+  await signOut(auth);
+
+  user = null;
+  profile = null;
+  activeId = null;
+  activeType = null;
+
+  showAuth();
+}
+
+[
+  "logoutBtn",
+  "settingsLogoutBtn",
+  "logoutHold",
+  "logoutRecovered",
+  "newAccountBtn"
+].forEach(id => {
+  on(id, "click", () => {
+    logout().catch(error => toast(error.message));
+  });
+});
+
+/* =========================================
+   ACCOUNT RECOVERY
+========================================= */
+
+on("verifyAccountBtn", "click", async () => {
+  if (!user) return showAuth();
+
   try {
-    clearListeners();
+    await loadProfile(user.uid);
 
-    if (currentUser) {
-      await remove(dbRef(rtdb, `status/${currentUser.uid}`)).catch(() => {});
+    if (profile.status !== "active") {
+      toast(
+        "Akun sudah dipulihkan, tetapi masih menunggu aktivasi administrator."
+      );
+      return;
     }
 
-    await signOut(auth);
+    showApp();
 
-    currentUser = null;
-    currentProfile = null;
-    activeConversation = null;
-    activeConversationType = null;
+    renderProfile();
 
-    confirmationResult = null;
-    linkConfirmation = null;
+    setupPresence();
+    listenChats();
+    listenGroups();
+    listenChannels();
+    listenStatuses();
 
-    resetRecaptcha();
-    resetLinkRecaptcha();
-
-    showAuth();
-
+    openPage("chatsPage");
   } catch (error) {
-    console.error("Logout:", error);
-    toast("Gagal keluar: " + error.message);
+    toast("Gagal memeriksa akun: " + error.message);
   }
-}
+});
 
-on("logoutBtn", "click", logout);
-on("settingsLogoutBtn", "click", logout);
-on("logoutHold", "click", logout);
-on("logoutRecovered", "click", logout);
-on("newAccountBtn", "click", logout);
-
-
-/* ==================================================
-   LISTENER MANAGEMENT
-================================================== */
-
-function addListener(unsubscribe) {
-  if (typeof unsubscribe === "function") {
-    listeners.push(unsubscribe);
-  }
-}
-
-function addConversationListener(unsubscribe) {
-  if (typeof unsubscribe === "function") {
-    conversationListeners.push(unsubscribe);
-  }
-}
-
-function clearConversationListeners() {
-  conversationListeners.forEach(unsubscribe => {
-    try {
-      unsubscribe();
-    } catch (error) {
-      console.warn("Conversation listener cleanup:", error);
-    }
-  });
-
-  conversationListeners = [];
-
-  clearTimeout(typingTimer);
-  typingTimer = null;
-
-  if (activeConversation && activeConversationType && currentUser) {
-    stopTyping(activeConversation, activeConversationType).catch(() => {});
-  }
-
-  if (presenceListener) {
-    try {
-      presenceListener();
-    } catch (error) {
-      console.warn(error);
-    }
-
-    presenceListener = null;
-  }
-}
-
-function clearListeners() {
-  clearConversationListeners();
-
-  listeners.forEach(unsubscribe => {
-    try {
-      unsubscribe();
-    } catch (error) {
-      console.warn("Listener cleanup:", error);
-    }
-  });
-
-  listeners = [];
-
-  if (currentUser) {
-    remove(dbRef(rtdb, `status/${currentUser.uid}/typing`)).catch(() => {});
-  }
-}
-
-
-/* ==================================================
+/* =========================================
    NAVIGATION
-================================================== */
+========================================= */
 
-function openPage(pageId) {
+function openPage(id) {
   document.querySelectorAll(".page").forEach(page => {
-    page.classList.toggle("active", page.id === pageId);
+    const active = page.id === id;
+
+    page.classList.toggle("active", active);
+    page.hidden = !active;
   });
 
   document.querySelectorAll(".nav-button[data-page]").forEach(button => {
     button.classList.toggle(
       "active",
-      button.dataset.page === pageId
+      button.dataset.page === id
     );
   });
 
-  const chatPanel = $("chatPanel");
-  const emptyChat = $("emptyChat");
+  if (id !== "chatsPage" && window.innerWidth <= 700) {
+    $("appScreen").classList.remove("mobile-chat-open");
 
-  if (pageId !== "chatsPage") {
-    hide(chatPanel);
-    show(emptyChat);
-  } else if (window.innerWidth <= 760) {
-    hide(chatPanel);
-    show(emptyChat);
+    hide($("chatPanel"));
+    show($("emptyChat"));
   }
 }
 
@@ -1094,26 +1036,28 @@ document.querySelectorAll(".nav-button[data-page]").forEach(button => {
   });
 });
 
-
-/* ==================================================
+/* =========================================
    THEME
-================================================== */
+========================================= */
 
 function setTheme(theme) {
-  document.documentElement.dataset.theme = theme;
+  document.body.dataset.theme = theme;
 
   try {
     localStorage.setItem("zora-theme", theme);
-  } catch (error) {
-    console.warn("Theme storage unavailable:", error);
-  }
-
-  const label = theme === "light" ? "Mode Terang" : "Mode Gelap";
-
-  if ($("themeLabel")) {
-    $("themeLabel").textContent = label;
-  }
+  } catch {}
 }
+
+function toggleTheme() {
+  setTheme(
+    document.body.dataset.theme === "light"
+      ? "dark"
+      : "light"
+  );
+}
+
+on("themeBtn", "click", toggleTheme);
+on("settingsThemeBtn", "click", toggleTheme);
 
 try {
   setTheme(localStorage.getItem("zora-theme") || "dark");
@@ -1121,121 +1065,35 @@ try {
   setTheme("dark");
 }
 
-function toggleTheme() {
-  const current = document.documentElement.dataset.theme || "dark";
-  setTheme(current === "dark" ? "light" : "dark");
+/* =========================================
+   PRIVATE CHAT
+========================================= */
+
+function chatId(a, b) {
+  return [a, b].sort().join("_");
 }
 
-on("themeBtn", "click", toggleTheme);
-on("settingsThemeBtn", "click", toggleTheme);
-
-
-/* ==================================================
-   AVATAR AND DATE HELPERS
-================================================== */
-
-function avatarHTML(name = "U", photoURL = "", className = "") {
-  const initial = escapeHTML(name.charAt(0).toUpperCase());
-
-  if (photoURL) {
-    return `
-      <div class="avatar ${className}"
-           style="background-image:url('${escapeHTML(photoURL)}')">
-      </div>
-    `;
-  }
-
-  return `
-    <div class="avatar ${className}">
-      ${initial}
-    </div>
-  `;
-}
-
-function formatTime(timestamp) {
-  if (!timestamp) return "";
-
-  const date = timestamp.toDate
-    ? timestamp.toDate()
-    : new Date(timestamp);
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  return date.toLocaleTimeString("id-ID", {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
-
-function formatLastSeen(timestamp) {
-  if (!timestamp) return "Terakhir dilihat tidak diketahui";
-
-  const date = timestamp.toDate
-    ? timestamp.toDate()
-    : new Date(timestamp);
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  return "Terakhir dilihat " + date.toLocaleString("id-ID", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
-
-function getTimestamp(value) {
-  if (!value) return 0;
-
-  if (typeof value.toMillis === "function") {
-    return value.toMillis();
-  }
-
-  if (typeof value.toDate === "function") {
-    return value.toDate().getTime();
-  }
-
-  return new Date(value).getTime() || 0;
-}
-
-
-/* ==================================================
-   PRIVATE CHAT ID
-================================================== */
-
-function makeChatId(uid1, uid2) {
-  return [uid1, uid2].sort().join("_");
-}
-
-
-/* ==================================================
-   START PRIVATE CHAT
-================================================== */
-
-async function startPrivateChat(uid) {
-  if (!currentUser || !uid || uid === currentUser.uid) return;
+async function startPrivate(uid) {
+  if (!uid || uid === user.uid) return;
 
   try {
     const profileSnap = await getDoc(doc(db, "users", uid));
 
     if (!profileSnap.exists()) {
-      toast("Pengguna tidak ditemukan.");
-      return;
+      throw Error("Pengguna tidak ditemukan.");
     }
 
     const target = profileSnap.data();
-    const chatId = makeChatId(currentUser.uid, uid);
 
-    const chatRef = doc(db, "chats", chatId);
+    const id = chatId(user.uid, uid);
+
+    const chatRef = doc(db, "chats", id);
+
     const chatSnap = await getDoc(chatRef);
 
     if (!chatSnap.exists()) {
       await setDoc(chatRef, {
-        members: [currentUser.uid, uid],
-        memberNames: {
-          [currentUser.uid]: currentProfile?.name || "Pengguna",
-          [uid]: target.name || "Pengguna"
-        },
+        members: [user.uid, uid],
         type: "private",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -1243,696 +1101,151 @@ async function startPrivateChat(uid) {
       });
     }
 
-    openConversation(chatId, "private", {
+    openConversation(id, "private", {
       uid,
       name: target.name || "Pengguna",
-      username: target.username || "",
       photoURL: target.photoURL || ""
     });
-
   } catch (error) {
-    console.error("Start private chat:", error);
     toast("Tidak bisa membuka chat: " + error.message);
   }
 }
 
-
-/* ==================================================
-   CHAT LIST
-================================================== */
-
 function listenChats() {
-  if (!currentUser) return;
-
   const chatsQuery = query(
     collection(db, "chats"),
-    where("members", "array-contains", currentUser.uid)
+    where("members", "array-contains", user.uid)
   );
 
-  const unsubscribe = onSnapshot(chatsQuery, async snapshot => {
-    if (!currentUser) return;
+  listen(
+    onSnapshot(chatsQuery, async snapshot => {
+      const list = await Promise.all(
+        snapshot.docs.map(async chatDoc => {
+          const other = chatDoc.data().members?.find(
+            uid => uid !== user.uid
+          );
 
-    const chats = await Promise.all(snapshot.docs.map(async item => {
-      const data = item.data();
+          if (!other) return null;
 
-      const otherUid = (data.members || []).find(
-        uid => uid !== currentUser.uid
+          const profileSnap = await getDoc(
+            doc(db, "users", other)
+          );
+
+          if (!profileSnap.exists()) return null;
+
+          const data = profileSnap.data();
+
+          return {
+            id: chatDoc.id,
+            uid: other,
+            name: data.name || "Pengguna",
+            photoURL: data.photoURL || "",
+            lastMessage: chatDoc.data().lastMessage || "Mulai percakapan",
+            updatedAt: chatDoc.data().updatedAt
+          };
+        })
       );
 
-      if (!otherUid) return null;
+      const valid = list
+        .filter(Boolean)
+        .sort((a, b) => stamp(b.updatedAt) - stamp(a.updatedAt));
 
-      try {
-        const profileSnap = await getDoc(doc(db, "users", otherUid));
+      const element = $("chatList");
 
-        if (!profileSnap.exists()) return null;
+      element.innerHTML = "";
 
-        const profile = profileSnap.data();
+      if (!valid.length) {
+        element.innerHTML =
+          '<div class="empty-state">Belum ada percakapan.</div>';
 
-        return {
-          id: item.id,
-          type: "private",
-          uid: otherUid,
-          name: profile.name || "Pengguna",
-          username: profile.username || "",
-          photoURL: profile.photoURL || "",
-          lastMessage: data.lastMessage || "",
-          updatedAt: data.updatedAt
-        };
-      } catch (error) {
-        console.warn("Chat profile:", error);
-        return null;
+        return;
       }
-    }));
 
-    chats.sort((a, b) =>
-      getTimestamp(b?.updatedAt) - getTimestamp(a?.updatedAt)
-    );
+      valid.forEach(chat => {
+        const button = document.createElement("button");
 
-    const container = $("chatList");
-    if (!container) return;
+        button.className = "chat-item";
 
-    container.innerHTML = "";
+        button.innerHTML =
+          avatar(chat.name, chat.photoURL) +
+          `<div class="chat-item-details">
+            <strong>${esc(chat.name)}</strong>
+            <span>${esc(chat.lastMessage)}</span>
+          </div>`;
 
-    const validChats = chats.filter(Boolean);
+        button.onclick = () => startPrivate(chat.uid);
 
-    if (!validChats.length) {
-      container.innerHTML = `
-        <div class="empty-state">
-          Belum ada percakapan.
-        </div>
-      `;
-      return;
-    }
-
-    validChats.forEach(chat => {
-      const button = document.createElement("button");
-      button.className = "chat-item";
-
-      button.innerHTML = `
-        ${avatarHTML(chat.name, chat.photoURL)}
-        <div class="chat-item-details">
-          <strong>${escapeHTML(chat.name)}</strong>
-          <span>${escapeHTML(chat.lastMessage || "Mulai percakapan")}</span>
-        </div>
-      `;
-
-      button.addEventListener("click", () => {
-        startPrivateChat(chat.uid);
+        element.append(button);
       });
-
-      container.appendChild(button);
-    });
-  }, error => {
-    console.error("Listen chats:", error);
-    toast("Gagal memuat daftar chat.");
-  });
-
-  addListener(unsubscribe);
-}
-
-
-/* ==================================================
-   OPEN CONVERSATION
-================================================== */
-
-function openConversation(id, type, info = {}) {
-  if (!currentUser || !id) return;
-
-  clearConversationListeners();
-
-  activeConversation = id;
-  activeConversationType = type;
-
-  hide($("emptyChat"));
-  show($("chatPanel"));
-
-  if ($("chatName")) {
-    $("chatName").textContent = info.name || "Percakapan";
-  }
-
-  if ($("chatAvatar")) {
-    $("chatAvatar").textContent =
-      (info.name || "P").charAt(0).toUpperCase();
-
-    $("chatAvatar").style.backgroundImage = info.photoURL
-      ? `url("${info.photoURL}")`
-      : "none";
-  }
-
-  if ($("chatPresence")) {
-    $("chatPresence").textContent = "";
-  }
-
-  if ($("messages")) {
-    $("messages").innerHTML = "";
-  }
-
-  if ($("typingIndicator")) {
-    $("typingIndicator").textContent = "";
-  }
-
-  hide($("channelControls"));
-  hide($("channelComposer"));
-
-  const composer = $("composer");
-
-  if (composer) {
-    composer.hidden = type === "channel" && !info.isOwner;
-  }
-
-  if ($("messageInput")) {
-    $("messageInput").disabled = type === "channel" && !info.isOwner;
-    $("messageInput").value = "";
-  }
-
-  if ($("sendBtn")) {
-    $("sendBtn").disabled = type === "channel" && !info.isOwner;
-  }
-
-  if ($("imageInput")) {
-    $("imageInput").disabled = type === "channel" && !info.isOwner;
-  }
-
-  if (type === "channel") {
-    show($("channelControls"));
-
-    if (info.isOwner) {
-      show($("channelComposer"));
-      if (composer) composer.hidden = true;
-    }
-
-    if ($("channelFollowerCount")) {
-      $("channelFollowerCount").textContent =
-        `${Number(info.followerCount || 0)} PENGIKUT`;
-    }
-
-    if ($("channelName")) {
-      $("channelName").textContent = info.name || "Saluran";
-    }
-  }
-
-  if (type === "group") {
-    const isOwner = info.ownerId === currentUser.uid;
-
-    if ($("inviteGroupMember")) {
-      $("inviteGroupMember").hidden = !isOwner;
-    }
-  }
-
-  listenMessages(id, type);
-
-  if (type === "private" || type === "group") {
-    listenTyping(id, type);
-  }
-
-  if (type === "private" && info.uid) {
-    listenChatPresence(info.uid);
-  }
-
-  if (window.innerWidth <= 760) {
-    $("chatPanel")?.classList.add("mobile-active");
-    $("contentArea")?.classList.add("mobile-chat-open");
-  }
-}
-
-
-/* ==================================================
-   BACK TO CHAT LIST ON MOBILE
-================================================== */
-
-on("backToChats", "click", () => {
-  clearConversationListeners();
-
-  activeConversation = null;
-  activeConversationType = null;
-
-  hide($("chatPanel"));
-  show($("emptyChat"));
-
-  $("chatPanel")?.classList.remove("mobile-active");
-  $("contentArea")?.classList.remove("mobile-chat-open");
-});
-
-
-/* ==================================================
-   MESSAGE COLLECTION
-================================================== */
-
-function messageCollection(id, type) {
-  if (type === "group") {
-    return collection(db, "groups", id, "messages");
-  }
-
-  if (type === "channel") {
-    return collection(db, "channels", id, "posts");
-  }
-
-  return collection(db, "chats", id, "messages");
-}
-
-
-/* ==================================================
-   LISTEN MESSAGES
-================================================== */
-
-function listenMessages(id, type) {
-  const messagesQuery = query(
-    messageCollection(id, type),
-    orderBy("createdAt", "asc"),
-    limit(MESSAGE_LIMIT)
+    }, error => {
+      console.error(error);
+      toast("Gagal memuat chat: " + error.message);
+    })
   );
-
-  const unsubscribe = onSnapshot(messagesQuery, snapshot => {
-    if (
-      activeConversation !== id ||
-      activeConversationType !== type
-    ) return;
-
-    const container = $("messages");
-    if (!container) return;
-
-    container.innerHTML = "";
-
-    snapshot.docs.forEach(item => {
-      const message = item.data();
-
-      renderMessage(item.id, message, type);
-    });
-
-    container.scrollTop = container.scrollHeight;
-
-    if (type !== "channel") {
-      markMessagesRead(id, type, snapshot.docs);
-    }
-
-  }, error => {
-    console.error("Listen messages:", error);
-    toast("Gagal memuat pesan. Periksa Firestore Rules.");
-  });
-
-  addConversationListener(unsubscribe);
 }
 
-
-/* ==================================================
-   RENDER MESSAGE
-================================================== */
-
-function renderMessage(messageId, message, type) {
-  const container = $("messages");
-  if (!container) return;
-
-  const own = message.senderId === currentUser?.uid;
-
-  const wrapper = document.createElement("div");
-  wrapper.className = own ? "message own" : "message";
-
-  const image = message.imageURL
-    ? `<img class="message-image"
-             src="${escapeHTML(message.imageURL)}"
-             alt="Gambar pesan"
-             loading="lazy">`
-    : "";
-
-  const text = message.text
-    ? `<div class="message-text">${escapeHTML(message.text)}</div>`
-    : "";
-
-  const sender = type === "group" && !own
-    ? `<div class="message-sender">${escapeHTML(message.senderName || "Pengguna")}</div>`
-    : "";
-
-  wrapper.innerHTML = `
-    <div class="message-bubble">
-      ${sender}
-      ${image}
-      ${text}
-      <div class="message-footer">
-        <span>${formatTime(message.createdAt)}</span>
-        ${own ? `<span class="message-tick">✓</span>` : ""}
-      </div>
-      <div class="message-reactions">
-        ${renderReactions(message.reactions)}
-      </div>
-      <button class="reaction-button" type="button">
-        + Reaksi
-      </button>
-    </div>
-  `;
-
-  wrapper.querySelector(".reaction-button")
-    ?.addEventListener("click", () => {
-      reactToMessage(messageId, type);
-    });
-
-  container.appendChild(wrapper);
-}
-
-
-/* ==================================================
-   MARK MESSAGES READ
-================================================== */
-
-async function markMessagesRead(id, type, documents) {
-  if (!currentUser) return;
-
-  const unread = documents.filter(item => {
-    const data = item.data();
-
-    return (
-      data.senderId !== currentUser.uid &&
-      !(data.readBy || []).includes(currentUser.uid)
-    );
-  });
-
-  for (const item of unread) {
-    try {
-      await updateDoc(item.ref, {
-        readBy: arrayUnion(currentUser.uid)
-      });
-    } catch (error) {
-      console.warn("Mark read:", error);
-    }
-  }
-}
-
-
-/* ==================================================
-   SEND MESSAGE
-================================================== */
-
-async function sendMessage(text = "", imageURL = "") {
-  if (!currentUser || !activeConversation) return;
-
-  const cleanText = String(text || "").trim();
-
-  if (!cleanText && !imageURL) return;
-
-  if (activeConversationType === "channel") {
-    toast("Gunakan fitur kirim postingan saluran.");
-    return;
-  }
-
-  try {
-    const parentRef = doc(
-      db,
-      activeConversationType === "group" ? "groups" : "chats",
-      activeConversation
-    );
-
-    const messagesRef = messageCollection(
-      activeConversation,
-      activeConversationType
-    );
-
-    await addDoc(messagesRef, {
-      senderId: currentUser.uid,
-      senderName: currentProfile?.name || "Pengguna",
-      text: cleanText,
-      imageURL,
-      reactions: {},
-      readBy: [currentUser.uid],
-      createdAt: serverTimestamp()
-    });
-
-    await updateDoc(parentRef, {
-      lastMessage: cleanText || "Foto",
-      updatedAt: serverTimestamp()
-    });
-
-    if ($("messageInput")) {
-      $("messageInput").value = "";
-    }
-
-    stopTyping(activeConversation, activeConversationType);
-
-  } catch (error) {
-    console.error("Send message:", error);
-    toast("Pesan gagal dikirim: " + error.message);
-  }
-}
-
-on("sendBtn", "click", () => {
-  sendMessage($("messageInput")?.value || "");
-});
-
-on("messageInput", "keydown", event => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    sendMessage($("messageInput")?.value || "");
-  }
-});
-
-
-/* ==================================================
-   SEND MESSAGE IMAGE
-================================================== */
-
-on("imageInput", "change", async event => {
-  const file = event.target.files?.[0];
-
-  if (!file || !currentUser || !activeConversation) return;
-
-  try {
-    const imageURL = await uploadImage(file, "messages");
-
-    if (activeConversationType === "channel") {
-      await sendChannelPost("", imageURL);
-    } else {
-      await sendMessage("", imageURL);
-    }
-
-    toast("Foto berhasil dikirim.");
-
-  } catch (error) {
-    console.error("Message image:", error);
-    toast("Gagal mengirim foto: " + error.message);
-
-  } finally {
-    event.target.value = "";
-  }
-});
-
-
-/* ==================================================
-   REACTIONS
-================================================== */
-
-function renderReactions(reactions = {}) {
-  return Object.entries(reactions || {})
-    .filter(([, users]) => Array.isArray(users) && users.length)
-    .map(([emoji, users]) => `
-      <span class="reaction-item">
-        ${escapeHTML(emoji)} ${users.length}
-      </span>
-    `)
-    .join("");
-}
-
-async function reactToMessage(messageId, type) {
-  if (!currentUser || !activeConversation) return;
-
-  const emoji = prompt("Masukkan reaksi: ❤️ 😂 👍 😮 😢 🔥");
-
-  if (!emoji || emoji.length > 8) return;
-
-  try {
-    const collectionRef = messageCollection(
-      activeConversation,
-      type
-    );
-
-    const messageRef = doc(collectionRef, messageId);
-
-    await runTransaction(db, async transaction => {
-      const snapshot = await transaction.get(messageRef);
-
-      if (!snapshot.exists()) {
-        throw new Error("Pesan tidak ditemukan.");
-      }
-
-      const data = snapshot.data();
-      const reactions = { ...(data.reactions || {}) };
-
-      const users = Array.isArray(reactions[emoji])
-        ? [...reactions[emoji]]
-        : [];
-
-      if (users.includes(currentUser.uid)) {
-        reactions[emoji] = users.filter(
-          uid => uid !== currentUser.uid
-        );
-      } else {
-        users.push(currentUser.uid);
-        reactions[emoji] = users;
-      }
-
-      transaction.update(messageRef, { reactions });
-    });
-
-  } catch (error) {
-    console.error("Reaction:", error);
-    toast("Gagal memberikan reaksi: " + error.message);
-  }
-}
-
-
-/* ==================================================
-   TYPING INDICATOR
-================================================== */
-
-function typingPath(id, type, uid) {
-  return `typing/${type}/${id}/${uid}`;
-}
-
-async function updateTyping(id, type) {
-  if (!currentUser || !id) return;
-
-  try {
-    await set(dbRef(rtdb, typingPath(id, type, currentUser.uid)), {
-      name: currentProfile?.name || "Pengguna",
-      typing: true,
-      updatedAt: rtdbTimestamp()
-    });
-  } catch (error) {
-    console.warn("Update typing:", error);
-  }
-
-  clearTimeout(typingTimer);
-
-  typingTimer = setTimeout(() => {
-    stopTyping(id, type);
-  }, 2500);
-}
-
-async function stopTyping(id, type) {
-  if (!currentUser || !id || !type) return;
-
-  clearTimeout(typingTimer);
-  typingTimer = null;
-
-  try {
-    await remove(dbRef(rtdb, typingPath(id, type, currentUser.uid)));
-  } catch (error) {
-    console.warn("Stop typing:", error);
-  }
-}
-
-function listenTyping(id, type) {
-  const typingRef = dbRef(rtdb, `typing/${type}/${id}`);
-
-  const unsubscribe = onValue(typingRef, snapshot => {
-    if (
-      activeConversation !== id ||
-      activeConversationType !== type
-    ) return;
-
-    const users = snapshot.val() || {};
-
-    const typingUsers = Object.entries(users)
-      .filter(([uid, data]) =>
-        uid !== currentUser?.uid && data?.typing
-      )
-      .map(([, data]) => data.name || "Pengguna");
-
-    if ($("typingIndicator")) {
-      $("typingIndicator").textContent = typingUsers.length
-        ? `${typingUsers.join(", ")} sedang mengetik...`
-        : "";
-    }
-  });
-
-  addConversationListener(() => {
-    unsubscribe();
-  });
-}
-
-on("messageInput", "input", () => {
-  if (
-    activeConversation &&
-    (activeConversationType === "private" ||
-     activeConversationType === "group")
-  ) {
-    updateTyping(activeConversation, activeConversationType);
-  }
-});
-
-
-/* ==================================================
-   GROUP LIST
-================================================== */
+/* =========================================
+   GROUPS
+========================================= */
 
 function listenGroups() {
-  if (!currentUser) return;
-
   const groupsQuery = query(
     collection(db, "groups"),
-    where("members", "array-contains", currentUser.uid)
+    where("members", "array-contains", user.uid)
   );
 
-  const unsubscribe = onSnapshot(groupsQuery, snapshot => {
-    const container = $("groupList");
-    if (!container) return;
+  listen(
+    onSnapshot(groupsQuery, snapshot => {
+      const element = $("groupList");
 
-    container.innerHTML = "";
+      element.innerHTML = "";
 
-    if (snapshot.empty) {
-      container.innerHTML = `
-        <div class="empty-state">Belum ada grup.</div>
-      `;
-      return;
-    }
+      if (snapshot.empty) {
+        element.innerHTML =
+          '<div class="empty-state">Belum ada grup.</div>';
 
-    snapshot.docs.forEach(item => {
-      const data = item.data();
+        return;
+      }
 
-      const button = document.createElement("button");
-      button.className = "chat-item";
+      snapshot.forEach(groupDoc => {
+        const data = groupDoc.data();
 
-      button.innerHTML = `
-        ${avatarHTML(data.name || "G")}
-        <div class="chat-item-details">
-          <strong>${escapeHTML(data.name || "Grup")}</strong>
-          <span>${escapeHTML(data.lastMessage || "Grup baru")}</span>
-        </div>
-      `;
+        const button = document.createElement("button");
 
-      button.addEventListener("click", () => {
-        openConversation(item.id, "group", {
-          name: data.name || "Grup",
-          ownerId: data.ownerId,
-          members: data.members || []
-        });
+        button.className = "chat-item";
+
+        button.innerHTML =
+          avatar(data.name || "G") +
+          `<div class="chat-item-details">
+            <strong>${esc(data.name || "Grup")}</strong>
+            <span>${esc(data.lastMessage || "Grup baru")}</span>
+          </div>`;
+
+        button.onclick = () => {
+          openConversation(groupDoc.id, "group", {
+            name: data.name,
+            ownerId: data.ownerId
+          });
+        };
+
+        element.append(button);
       });
-
-      container.appendChild(button);
-    });
-
-  }, error => {
-    console.error("Listen groups:", error);
-    toast("Gagal memuat daftar grup.");
-  });
-
-  addListener(unsubscribe);
+    }, error => {
+      toast("Gagal memuat grup: " + error.message);
+    })
+  );
 }
 
-
-/* ==================================================
-   CREATE GROUP
-================================================== */
-
 on("createGroupBtn", "click", async () => {
-  if (!currentUser) return;
-
   const name = prompt("Masukkan nama grup:");
 
   if (!name?.trim()) return;
 
   try {
-    const groupRef = await addDoc(collection(db, "groups"), {
+    const result = await addDoc(collection(db, "groups"), {
       name: name.trim(),
-      ownerId: currentUser.uid,
-      members: [currentUser.uid],
+      ownerId: user.uid,
+      members: [user.uid],
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       lastMessage: ""
@@ -1940,60 +1253,48 @@ on("createGroupBtn", "click", async () => {
 
     toast("Grup berhasil dibuat.");
 
-    openConversation(groupRef.id, "group", {
+    openConversation(result.id, "group", {
       name: name.trim(),
-      ownerId: currentUser.uid,
-      members: [currentUser.uid]
+      ownerId: user.uid
     });
-
   } catch (error) {
-    console.error("Create group:", error);
     toast("Gagal membuat grup: " + error.message);
   }
 });
 
-
-/* ==================================================
-   INVITE GROUP MEMBER
-================================================== */
-
 on("inviteGroupMember", "click", async () => {
-  if (
-    !currentUser ||
-    !activeConversation ||
-    activeConversationType !== "group"
-  ) return;
+  if (activeType !== "group") return;
 
-  const username = prompt("Masukkan username anggota:");
+  const username = prompt("Masukkan username anggota:")
+    ?.trim()
+    .toLowerCase();
 
-  if (!username?.trim()) return;
+  if (!username) return;
 
   try {
-    const groupRef = doc(db, "groups", activeConversation);
+    const groupRef = doc(db, "groups", activeId);
+
     const groupSnap = await getDoc(groupRef);
 
-    if (!groupSnap.exists()) {
-      throw new Error("Grup tidak ditemukan.");
-    }
-
-    const group = groupSnap.data();
-
-    if (group.ownerId !== currentUser.uid) {
-      throw new Error("Hanya pemilik grup yang bisa mengundang anggota.");
+    if (
+      !groupSnap.exists() ||
+      groupSnap.data().ownerId !== user.uid
+    ) {
+      throw Error("Hanya pemilik grup yang bisa mengundang.");
     }
 
     const usernameSnap = await getDoc(
-      doc(db, "usernames", username.trim().toLowerCase())
+      doc(db, "usernames", username)
     );
 
     if (!usernameSnap.exists()) {
-      throw new Error("Username tidak ditemukan.");
+      throw Error("Username tidak ditemukan.");
     }
 
     const targetUid = usernameSnap.data().uid;
 
-    if (targetUid === currentUser.uid) {
-      throw new Error("Kamu sudah menjadi anggota grup.");
+    if (targetUid === user.uid) {
+      throw Error("Kamu sudah menjadi anggota.");
     }
 
     await updateDoc(groupRef, {
@@ -2001,436 +1302,292 @@ on("inviteGroupMember", "click", async () => {
     });
 
     toast("Anggota berhasil ditambahkan.");
-
   } catch (error) {
-    console.error("Invite group:", error);
     toast(error.message);
   }
 });
 
-
-/* ==================================================
-   CHANNEL LIST
-================================================== */
+/* =========================================
+   CHANNELS
+========================================= */
 
 function listenChannels() {
-  if (!currentUser) return;
-
   const channelsQuery = query(
     collection(db, "channels"),
     orderBy("createdAt", "desc")
   );
 
-  const unsubscribe = onSnapshot(channelsQuery, snapshot => {
-    const container = $("channelList");
-    if (!container) return;
+  listen(
+    onSnapshot(channelsQuery, snapshot => {
+      const element = $("channelList");
 
-    container.innerHTML = "";
+      element.innerHTML = "";
 
-    if (snapshot.empty) {
-      container.innerHTML = `
-        <div class="empty-state">Belum ada saluran.</div>
-      `;
-      return;
-    }
+      if (snapshot.empty) {
+        element.innerHTML =
+          '<div class="empty-state">Belum ada saluran.</div>';
 
-    snapshot.docs.forEach(item => {
-      const data = item.data();
+        return;
+      }
 
-      const button = document.createElement("button");
-      button.className = "chat-item";
+      snapshot.forEach(channelDoc => {
+        const data = channelDoc.data();
 
-      button.innerHTML = `
-        ${avatarHTML(data.name || "S")}
-        <div class="channel-item-details">
-          <strong>${escapeHTML(data.name || "Saluran")}</strong>
-          <span>${Number(data.followerCount || 0)} PENGIKUT</span>
-        </div>
-      `;
+        const button = document.createElement("button");
 
-      button.addEventListener("click", () => {
-        openChannel(item.id);
+        button.className = "chat-item";
+
+        button.innerHTML =
+          avatar(data.name || "S") +
+          `<div class="channel-item-details">
+            <strong>${esc(data.name || "Saluran")}</strong>
+            <span>${Number(data.followerCount || 0)} PENGIKUT</span>
+          </div>`;
+
+        button.onclick = () => openChannel(channelDoc.id);
+
+        element.append(button);
       });
-
-      container.appendChild(button);
-    });
-
-  }, error => {
-    console.error("Listen channels:", error);
-    toast("Gagal memuat saluran.");
-  });
-
-  addListener(unsubscribe);
+    }, error => {
+      toast("Gagal memuat saluran: " + error.message);
+    })
+  );
 }
-
-
-/* ==================================================
-   OPEN CHANNEL
-================================================== */
 
 async function openChannel(id) {
-  if (!currentUser) return;
-
   try {
-    const channelSnap = await getDoc(doc(db, "channels", id));
-
-    if (!channelSnap.exists()) {
-      toast("Saluran tidak ditemukan.");
-      return;
-    }
-
-    const channel = channelSnap.data();
-
-    const isOwner = channel.ownerId === currentUser.uid;
-
-    const followerSnap = await getDoc(
-      doc(db, "channels", id, "followers", currentUser.uid)
+    const channelSnap = await getDoc(
+      doc(db, "channels", id)
     );
 
-    const isFollower = followerSnap.exists();
-
-    if (!isOwner && !isFollower) {
-      clearConversationListeners();
-
-      activeConversation = id;
-      activeConversationType = "channel";
-
-      show($("chatPanel"));
-      hide($("emptyChat"));
-
-      if ($("chatName")) {
-        $("chatName").textContent = channel.name || "Saluran";
-      }
-
-      if ($("channelFollowerCount")) {
-        $("channelFollowerCount").textContent =
-          `${Number(channel.followerCount || 0)} PENGIKUT`;
-      }
-
-      if ($("messages")) {
-        $("messages").innerHTML = `
-          <div class="empty-state">
-            Ikuti saluran ini untuk melihat postingannya.
-          </div>
-        `;
-      }
-
-      hide($("composer"));
-      hide($("channelComposer"));
-      show($("channelControls"));
-
-      if ($("followChannelBtn")) {
-        $("followChannelBtn").hidden = false;
-        $("followChannelBtn").textContent = "IKUTI SALURAN";
-      }
-
-      if ($("unfollowChannelBtn")) {
-        hide($("unfollowChannelBtn"));
-      }
-
-      return;
+    if (!channelSnap.exists()) {
+      throw Error("Saluran tidak ditemukan.");
     }
+
+    const data = channelSnap.data();
+
+    const isOwner = data.ownerId === user.uid;
+
+    const followerSnap = await getDoc(
+      doc(db, "channels", id, "followers", user.uid)
+    );
 
     openConversation(id, "channel", {
-      name: channel.name || "Saluran",
-      ownerId: channel.ownerId,
+      name: data.name,
+      ownerId: data.ownerId,
       isOwner,
-      followerCount: channel.followerCount || 0
+      isFollowing: followerSnap.exists(),
+      followerCount: data.followerCount || 0
     });
-
-    if ($("followChannelBtn")) {
-      hide($("followChannelBtn"));
-    }
-
-    if ($("unfollowChannelBtn")) {
-      $("unfollowChannelBtn").hidden = isOwner;
-    }
-
   } catch (error) {
-    console.error("Open channel:", error);
-    toast("Gagal membuka saluran: " + error.message);
+    toast(error.message);
   }
 }
 
+async function changeChannelFollow(id, follow) {
+  const channelRef = doc(db, "channels", id);
 
-/* ==================================================
-   FOLLOW CHANNEL
-================================================== */
-
-on("followChannelBtn", "click", async () => {
-  if (!currentUser || !activeConversation) return;
-
-  const channelId = activeConversation;
+  const followerRef = doc(
+    db,
+    "channels",
+    id,
+    "followers",
+    user.uid
+  );
 
   try {
-    const channelRef = doc(db, "channels", channelId);
-    const followerRef = doc(
-      db,
-      "channels",
-      channelId,
-      "followers",
-      currentUser.uid
-    );
-
     await runTransaction(db, async transaction => {
       const channelSnap = await transaction.get(channelRef);
       const followerSnap = await transaction.get(followerRef);
 
       if (!channelSnap.exists()) {
-        throw new Error("Saluran tidak ditemukan.");
+        throw Error("Saluran tidak ditemukan.");
       }
 
-      if (followerSnap.exists()) return;
+      const count = Number(
+        channelSnap.data().followerCount || 0
+      );
 
-      transaction.set(followerRef, {
-        uid: currentUser.uid,
-        name: currentProfile?.name || "Pengguna",
-        followedAt: serverTimestamp()
-      });
+      if (follow && !followerSnap.exists()) {
+        transaction.set(followerRef, {
+          uid: user.uid,
+          name: profile.name,
+          followedAt: serverTimestamp()
+        });
 
-      transaction.update(channelRef, {
-        followerCount: Number(channelSnap.data().followerCount || 0) + 1
-      });
+        transaction.update(channelRef, {
+          followerCount: count + 1
+        });
+      } else if (!follow && followerSnap.exists()) {
+        transaction.delete(followerRef);
+
+        transaction.update(channelRef, {
+          followerCount: Math.max(0, count - 1)
+        });
+      }
     });
 
-    toast("Berhasil mengikuti saluran.");
-    await openChannel(channelId);
-
-  } catch (error) {
-    console.error("Follow channel:", error);
-    toast("Gagal mengikuti saluran: " + error.message);
-  }
-});
-
-
-/* ==================================================
-   UNFOLLOW CHANNEL
-================================================== */
-
-on("unfollowChannelBtn", "click", async () => {
-  if (!currentUser || !activeConversation) return;
-
-  const channelId = activeConversation;
-
-  try {
-    const channelRef = doc(db, "channels", channelId);
-    const followerRef = doc(
-      db,
-      "channels",
-      channelId,
-      "followers",
-      currentUser.uid
+    toast(
+      follow
+        ? "Berhasil mengikuti saluran."
+        : "Berhenti mengikuti saluran."
     );
 
-    await runTransaction(db, async transaction => {
-      const channelSnap = await transaction.get(channelRef);
-      const followerSnap = await transaction.get(followerRef);
-
-      if (!channelSnap.exists()) {
-        throw new Error("Saluran tidak ditemukan.");
-      }
-
-      if (!followerSnap.exists()) return;
-
-      transaction.delete(followerRef);
-
-      transaction.update(channelRef, {
-        followerCount: Math.max(
-          0,
-          Number(channelSnap.data().followerCount || 0) - 1
-        )
-      });
-    });
-
-    toast("Kamu berhenti mengikuti saluran.");
-
-    activeConversation = null;
-    activeConversationType = null;
-
-    hide($("chatPanel"));
-    show($("emptyChat"));
-
+    await openChannel(id);
   } catch (error) {
-    console.error("Unfollow channel:", error);
-    toast("Gagal berhenti mengikuti: " + error.message);
+    toast("Gagal memperbarui pengikut: " + error.message);
   }
-});
-
-
-/* ==================================================
-   CREATE CHANNEL
-================================================== */
+}
 
 on("createChannelBtn", "click", async () => {
-  if (!currentUser) return;
+  const name = prompt("Nama saluran:")?.trim();
 
-  const name = prompt("Nama saluran:");
-
-  if (!name?.trim()) return;
+  if (!name) return;
 
   const description = prompt("Deskripsi saluran:") || "";
 
   try {
-    const channelRef = await addDoc(collection(db, "channels"), {
-      name: name.trim(),
-      description: description.trim(),
-      ownerId: currentUser.uid,
+    const result = await addDoc(collection(db, "channels"), {
+      name,
+      description,
+      ownerId: user.uid,
       followerCount: 0,
       createdAt: serverTimestamp()
     });
 
     toast("Saluran berhasil dibuat.");
 
-    openChannel(channelRef.id);
-
+    openChannel(result.id);
   } catch (error) {
-    console.error("Create channel:", error);
     toast("Gagal membuat saluran: " + error.message);
   }
 });
 
-
-/* ==================================================
-   SEND CHANNEL POST
-================================================== */
-
 async function sendChannelPost(text = "", imageURL = "") {
-  if (
-    !currentUser ||
-    !activeConversation ||
-    activeConversationType !== "channel"
-  ) return;
+  if (activeType !== "channel" || !activeId) return;
 
-  const channelId = activeConversation;
-  const cleanText = String(text || "").trim();
+  const id = activeId;
+  const clean = text.trim();
 
-  if (!cleanText && !imageURL) return;
+  if (!clean && !imageURL) return;
 
   try {
-    const channelRef = doc(db, "channels", channelId);
+    const channelRef = doc(db, "channels", id);
+
     const channelSnap = await getDoc(channelRef);
 
-    if (!channelSnap.exists()) {
-      throw new Error("Saluran tidak ditemukan.");
+    if (
+      !channelSnap.exists() ||
+      channelSnap.data().ownerId !== user.uid
+    ) {
+      throw Error("Hanya pemilik saluran yang bisa posting.");
     }
 
-    const channel = channelSnap.data();
-
-    if (channel.ownerId !== currentUser.uid) {
-      throw new Error("Hanya admin saluran yang bisa mengirim postingan.");
-    }
-
-    await addDoc(collection(db, "channels", channelId, "posts"), {
-      senderId: currentUser.uid,
-      senderName: currentProfile?.name || "Admin",
-      text: cleanText,
-      imageURL,
-      reactions: {},
-      createdAt: serverTimestamp()
-    });
+    await addDoc(
+      collection(db, "channels", id, "posts"),
+      {
+        senderId: user.uid,
+        senderName: profile.name,
+        text: clean,
+        imageURL,
+        reactions: {},
+        createdAt: serverTimestamp()
+      }
+    );
 
     await updateDoc(channelRef, {
       updatedAt: serverTimestamp()
     });
 
-    if ($("channelPostInput")) {
-      $("channelPostInput").value = "";
-    }
-
+    $("channelPostInput").value = "";
   } catch (error) {
-    console.error("Channel post:", error);
-    toast("Gagal mengirim postingan: " + error.message);
+    toast("Gagal posting: " + error.message);
   }
 }
 
-on("sendChannelPostBtn", "click", () => {
-  sendChannelPost($("channelPostInput")?.value || "");
+on("sendChannelPost", "click", () => {
+  sendChannelPost($("channelPostInput").value);
 });
 
+on("channelImageInput", "change", async event => {
+  const file = event.target.files?.[0];
 
-/* ==================================================
-   CHANNEL POST REACTIONS
-================================================== */
+  if (!file) return;
 
-on("channelReactionBtn", "click", () => {
-  if (
-    activeConversation &&
-    activeConversationType === "channel"
-  ) {
-    toast("Gunakan tombol + Reaksi pada postingan.");
+  try {
+    const url = await uploadImage(file, "channel-posts");
+
+    await sendChannelPost("", url);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    event.target.value = "";
   }
 });
 
-
-/* ==================================================
-   STATUS LIST
-================================================== */
+/* =========================================
+   STATUS
+========================================= */
 
 function listenStatuses() {
-  if (!currentUser) return;
-
   const statusesQuery = query(
     collection(db, "statuses"),
     orderBy("createdAt", "desc"),
     limit(100)
   );
 
-  const unsubscribe = onSnapshot(statusesQuery, snapshot => {
-    const container = $("statusList");
-    if (!container) return;
+  listen(
+    onSnapshot(statusesQuery, snapshot => {
+      const element = $("statusList");
 
-    container.innerHTML = "";
+      element.innerHTML = "";
 
-    const now = Date.now();
+      const items = snapshot.docs
+        .map(document => ({
+          id: document.id,
+          ...document.data()
+        }))
+        .filter(item => {
+          return !item.expiresAt || item.expiresAt > Date.now();
+        });
 
-    const statuses = snapshot.docs
-      .map(item => ({
-        id: item.id,
-        ...item.data()
-      }))
-      .filter(status => {
-        const expiry = Number(status.expiresAt || 0);
-        return !expiry || expiry > now;
-      });
+      if (!items.length) {
+        element.innerHTML =
+          '<div class="empty-state">Belum ada status.</div>';
+      } else {
+        items.forEach(item => {
+          const button = document.createElement("button");
 
-    if (!statuses.length) {
-      container.innerHTML = `
-        <div class="empty-state">Belum ada status.</div>
-      `;
-      return;
-    }
+          button.className = "status-item";
 
-    statuses.forEach(status => {
-      const button = document.createElement("button");
-      button.className = "status-item";
+          button.innerHTML =
+            avatar(item.name || "U", item.photoURL) +
+            `<div class="status-item-details">
+              <strong>${esc(item.name || "Pengguna")}</strong>
+              <span>${esc(item.text || "Status")}</span>
+            </div>`;
 
-      button.innerHTML = `
-        ${avatarHTML(status.name || "U", status.photoURL)}
-        <div class="status-item-details">
-          <strong>${escapeHTML(status.name || "Pengguna")}</strong>
-          <span>${escapeHTML(status.text || "Status")}</span>
-        </div>
-      `;
+          button.onclick = () => showStatus(item);
 
-      button.addEventListener("click", () => {
-        showStatus(status);
-      });
+          element.append(button);
+        });
+      }
 
-      container.appendChild(button);
-    });
+      const mine = items.filter(item => item.uid === user.uid);
 
-  }, error => {
-    console.error("Listen statuses:", error);
-    toast("Gagal memuat status.");
-  });
-
-  addListener(unsubscribe);
+      $("myStatuses").innerHTML = mine
+        .map(item => `
+          <div class="status-item">
+            <strong>${esc(item.text)}</strong>
+          </div>
+        `)
+        .join("") ||
+        '<p class="input-hint">Belum ada status yang kamu bagikan.</p>';
+    }, error => {
+      toast("Gagal memuat status: " + error.message);
+    })
+  );
 }
-
-
-/* ==================================================
-   CREATE STATUS
-================================================== */
 
 on("createStatusBtn", "click", () => {
   show($("statusModal"));
@@ -2440,281 +1597,696 @@ on("closeStatus", "click", () => {
   hide($("statusModal"));
 });
 
-on("publishStatusBtn", "click", async () => {
-  if (!currentUser) return;
-
-  const text = $("statusInput")?.value.trim();
+on("publishStatus", "click", async () => {
+  const text = $("statusInput").value.trim();
 
   if (!text) {
-    toast("Isi status terlebih dahulu.");
-    return;
+    return toast("Isi status terlebih dahulu.");
   }
 
   try {
     await addDoc(collection(db, "statuses"), {
-      uid: currentUser.uid,
-      name: currentProfile?.name || "Pengguna",
-      photoURL: currentProfile?.photoURL || "",
+      uid: user.uid,
+      name: profile.name,
+      photoURL: profile.photoURL || "",
       text,
       createdAt: serverTimestamp(),
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000
+      expiresAt: Date.now() + 86400000
     });
 
-    if ($("statusInput")) {
-      $("statusInput").value = "";
-    }
+    $("statusInput").value = "";
 
     hide($("statusModal"));
-    toast("Status berhasil dibagikan.");
 
+    toast("Status berhasil dibagikan.");
   } catch (error) {
-    console.error("Publish status:", error);
     toast("Gagal membagikan status: " + error.message);
   }
 });
 
-
-/* ==================================================
-   VIEW STATUS
-================================================== */
-
 function showStatus(status) {
-  const modal = $("viewStatusModal");
+  $("viewStatusName").textContent = status.name || "Pengguna";
+  $("viewStatusText").textContent = status.text || "";
 
-  if (!modal) {
-    toast(status.text || "Status");
-    return;
-  }
-
-  if ($("viewStatusName")) {
-    $("viewStatusName").textContent = status.name || "Pengguna";
-  }
-
-  if ($("viewStatusText")) {
-    $("viewStatusText").textContent = status.text || "";
-  }
-
-  show(modal);
+  show($("viewStatusModal"));
 }
 
 on("closeViewStatus", "click", () => {
   hide($("viewStatusModal"));
 });
 
+/* =========================================
+   CONVERSATION
+========================================= */
 
-/* ==================================================
-   USER SEARCH
-================================================== */
+function openConversation(id, type, info = {}) {
+  clearChatListeners();
 
-async function searchUsers(keyword) {
-  if (!currentUser) return;
+  activeId = id;
+  activeType = type;
 
-  const container = $("searchResults");
-  if (!container) return;
+  show($("chatPanel"));
+  hide($("emptyChat"));
 
-  const term = String(keyword || "")
+  $("chatName").textContent = info.name || "Percakapan";
+
+  $("chatAvatar").textContent =
+    (info.name || "U")[0].toUpperCase();
+
+  $("chatAvatar").style.backgroundImage = info.photoURL
+    ? `url("${info.photoURL}")`
+    : "none";
+
+  msg("chatPresence");
+  msg("typingIndicator");
+
+  hide($("channelControls"));
+  hide($("channelComposer"));
+
+  show($("composer"));
+
+  $("composer").hidden = type === "channel";
+
+  $("messageInput").disabled = type === "channel";
+  $("sendBtn").disabled = type === "channel";
+  $("imageInput").disabled = type === "channel";
+
+  hide($("inviteGroupMember"));
+
+  if (type === "group") {
+    $("inviteGroupMember").hidden =
+      info.ownerId !== user.uid;
+  }
+
+  if (type === "channel") {
+    const controls = $("channelControls");
+
+    show(controls);
+
+    const count = Number(info.followerCount || 0);
+
+    controls.innerHTML = `
+      <div class="channel-meta">
+        <strong>${count} PENGIKUT</strong>
+      </div>
+
+      ${
+        info.isOwner
+          ? '<span class="channel-owner-label">ADMIN SALURAN</span>'
+          : info.isFollowing
+            ? '<button id="unfollowChannelBtn" class="secondary-btn" type="button">Berhenti mengikuti</button>'
+            : '<button id="followChannelBtn" class="primary-btn" type="button">IKUTI SALURAN</button>'
+      }
+    `;
+
+    if (info.isOwner) {
+      show($("channelComposer"));
+    }
+
+    if (info.isFollowing || info.isOwner) {
+      listenMessages(id, type);
+    } else {
+      $("messages").innerHTML = `
+        <div class="empty-state">
+          <h2>Ikuti saluran</h2>
+          <p>Ikuti saluran ini untuk melihat postingannya.</p>
+        </div>
+      `;
+    }
+
+    const followButton = $("followChannelBtn");
+    const unfollowButton = $("unfollowChannelBtn");
+
+    if (followButton) {
+      followButton.onclick = () => {
+        changeChannelFollow(id, true);
+      };
+    }
+
+    if (unfollowButton) {
+      unfollowButton.onclick = () => {
+        changeChannelFollow(id, false);
+      };
+    }
+  } else {
+    listenMessages(id, type);
+    listenTyping(id, type);
+
+    if (type === "private" && info.uid) {
+      listenPresence(info.uid);
+    }
+  }
+
+  if (innerWidth <= 700) {
+    $("appScreen").classList.add("mobile-chat-open");
+  }
+}
+
+on("backToChats", "click", () => {
+  $("appScreen").classList.remove("mobile-chat-open");
+
+  clearChatListeners();
+
+  activeId = null;
+  activeType = null;
+
+  hide($("chatPanel"));
+  show($("emptyChat"));
+});
+
+/* =========================================
+   MESSAGES
+========================================= */
+
+function msgCol(id, type) {
+  const parent =
+    type === "group"
+      ? "groups"
+      : type === "channel"
+        ? "channels"
+        : "chats";
+
+  const child = type === "channel" ? "posts" : "messages";
+
+  return collection(db, parent, id, child);
+}
+
+function listenMessages(id, type) {
+  const messagesQuery = query(
+    msgCol(id, type),
+    orderBy("createdAt", "asc"),
+    limit(100)
+  );
+
+  listen(
+    onSnapshot(messagesQuery, snapshot => {
+      if (activeId !== id || activeType !== type) return;
+
+      const element = $("messages");
+
+      element.innerHTML = "";
+
+      snapshot.forEach(document => {
+        renderMessage(
+          document.id,
+          document.data(),
+          type
+        );
+      });
+
+      element.scrollTop = element.scrollHeight;
+
+      if (type !== "channel") {
+        markRead(snapshot.docs);
+      }
+    }, error => {
+      console.error(error);
+
+      toast(
+        "Gagal memuat pesan. Periksa Firestore Rules: " +
+        error.message
+      );
+    }),
+    true
+  );
+}
+
+function renderMessage(id, message, type) {
+  const own = message.senderId === user.uid;
+
+  const wrapper = document.createElement("div");
+
+  wrapper.className = "message" + (own ? " own" : "");
+
+  wrapper.innerHTML = `
+    <div class="message-bubble">
+
+      ${
+        type === "group" && !own
+          ? `<div class="message-sender">${esc(message.senderName || "Pengguna")}</div>`
+          : ""
+      }
+
+      ${
+        message.imageURL
+          ? `<img class="message-image" src="${esc(message.imageURL)}" alt="Gambar pesan">`
+          : ""
+      }
+
+      ${
+        message.text
+          ? `<div class="message-text">${esc(message.text)}</div>`
+          : ""
+      }
+
+      <div class="message-footer">
+        <span>
+          ${
+            message.createdAt?.toDate
+              ? message.createdAt.toDate().toLocaleTimeString(
+                  "id-ID",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit"
+                  }
+                )
+              : ""
+          }
+        </span>
+
+        ${own ? "✓" : ""}
+      </div>
+
+      <div class="message-reactions">
+        ${
+          Object.entries(message.reactions || {})
+            .filter(([, users]) => Array.isArray(users) && users.length)
+            .map(([emoji, users]) => {
+              return `<span>${esc(emoji)} ${users.length}</span>`;
+            })
+            .join(" ")
+        }
+      </div>
+
+      <button class="reaction-button" type="button">
+        + Reaksi
+      </button>
+    </div>
+  `;
+
+  wrapper.querySelector(".reaction-button").onclick = () => {
+    react(id, type);
+  };
+
+  $("messages").append(wrapper);
+}
+
+async function markRead(documents) {
+  for (const document of documents) {
+    const data = document.data();
+
+    if (
+      data.senderId !== user.uid &&
+      !(data.readBy || []).includes(user.uid)
+    ) {
+      updateDoc(document.ref, {
+        readBy: arrayUnion(user.uid)
+      }).catch(() => {});
+    }
+  }
+}
+
+async function sendMessage(text = "", imageURL = "") {
+  if (!activeId || !user || activeType === "channel") return;
+
+  const clean = text.trim();
+
+  if (!clean && !imageURL) return;
+
+  try {
+    await addDoc(
+      msgCol(activeId, activeType),
+      {
+        senderId: user.uid,
+        senderName: profile.name || "Pengguna",
+        text: clean,
+        imageURL,
+        reactions: {},
+        readBy: [user.uid],
+        createdAt: serverTimestamp()
+      }
+    );
+
+    await updateDoc(
+      doc(
+        db,
+        activeType === "group" ? "groups" : "chats",
+        activeId
+      ),
+      {
+        lastMessage: clean || "Foto",
+        updatedAt: serverTimestamp()
+      }
+    );
+
+    $("messageInput").value = "";
+
+    stopTyping(activeId, activeType);
+  } catch (error) {
+    toast("Pesan gagal dikirim: " + error.message);
+  }
+}
+
+on("sendBtn", "click", () => {
+  sendMessage($("messageInput").value);
+});
+
+on("messageInput", "keydown", event => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+
+    sendMessage($("messageInput").value);
+  }
+});
+
+on("imageInput", "change", async event => {
+  const file = event.target.files?.[0];
+
+  if (!file || !activeId) return;
+
+  try {
+    const url = await uploadImage(file, "messages");
+
+    await sendMessage("", url);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    event.target.value = "";
+  }
+});
+
+/* =========================================
+   MESSAGE REACTIONS
+========================================= */
+
+async function react(id, type) {
+  const emoji = prompt("Masukkan reaksi: ❤️ 😂 👍 😮 😢 🔥");
+
+  if (!emoji || emoji.length > 8) return;
+
+  try {
+    const reference = doc(
+      msgCol(activeId, type),
+      id
+    );
+
+    await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(reference);
+
+      if (!snapshot.exists()) return;
+
+      const data = snapshot.data();
+
+      const reactions = {
+        ...(data.reactions || {})
+      };
+
+      const users = [
+        ...(reactions[emoji] || [])
+      ];
+
+      reactions[emoji] = users.includes(user.uid)
+        ? users.filter(uid => uid !== user.uid)
+        : [...users, user.uid];
+
+      transaction.update(reference, {
+        reactions
+      });
+    });
+  } catch (error) {
+    toast("Gagal memberi reaksi: " + error.message);
+  }
+}
+
+/* =========================================
+   TYPING INDICATOR
+========================================= */
+
+function typingRef(id, type, uid) {
+  return dbRef(
+    rtdb,
+    `typing/${type}/${id}/${uid}`
+  );
+}
+
+async function typeOn() {
+  if (!activeId || !activeType || activeType === "channel") {
+    return;
+  }
+
+  set(
+    typingRef(activeId, activeType, user.uid),
+    {
+      name: profile.name,
+      typing: true,
+      updatedAt: rtdbTimestamp()
+    }
+  ).catch(() => {});
+
+  clearTimeout(typingTimer);
+
+  typingTimer = setTimeout(() => {
+    stopTyping(activeId, activeType);
+  }, 2200);
+}
+
+async function stopTyping(id, type) {
+  if (user && id && type) {
+    remove(
+      typingRef(id, type, user.uid)
+    ).catch(() => {});
+  }
+}
+
+on("messageInput", "input", typeOn);
+
+function listenTyping(id, type) {
+  const reference = dbRef(
+    rtdb,
+    `typing/${type}/${id}`
+  );
+
+  const unsubscribe = onValue(reference, snapshot => {
+    const names = Object.entries(snapshot.val() || {})
+      .filter(([uid, value]) => {
+        return uid !== user.uid && value.typing;
+      })
+      .map(([, value]) => value.name || "Pengguna");
+
+    msg(
+      "typingIndicator",
+      names.length
+        ? names.join(", ") + " sedang mengetik..."
+        : ""
+    );
+  });
+
+  listen(unsubscribe, true);
+}
+
+/* =========================================
+   ONLINE / LAST SEEN
+========================================= */
+
+function listenPresence(uid) {
+  const unsubscribe = onValue(
+    dbRef(rtdb, `status/${uid}`),
+    snapshot => {
+      const value = snapshot.val();
+
+      msg(
+        "chatPresence",
+        !value
+          ? ""
+          : value.state === "online"
+            ? "Online"
+            : "Terakhir dilihat " +
+              new Date(
+                value.lastChanged || Date.now()
+              ).toLocaleString("id-ID", {
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit"
+              })
+      );
+    }
+  );
+
+  presenceUnsub = unsubscribe;
+
+  listen(unsubscribe, true);
+}
+
+function setupPresence() {
+  const connectedRef = dbRef(rtdb, ".info/connected");
+
+  const unsubscribe = onValue(
+    connectedRef,
+    async snapshot => {
+      if (snapshot.val() !== true || !user) return;
+
+      const reference = dbRef(
+        rtdb,
+        `status/${user.uid}`
+      );
+
+      try {
+        await onDisconnect(reference).set({
+          state: "offline",
+          lastChanged: rtdbTimestamp()
+        });
+
+        await set(reference, {
+          state: "online",
+          lastChanged: rtdbTimestamp()
+        });
+      } catch (error) {
+        console.warn(error);
+      }
+    }
+  );
+
+  listen(unsubscribe);
+}
+
+/* =========================================
+   SEARCH USERS
+========================================= */
+
+on("searchUser", "input", event => {
+  clearTimeout(searchTimer);
+
+  searchTimer = setTimeout(() => {
+    searchUsers(event.target.value);
+  }, 300);
+});
+
+async function searchUsers(term) {
+  const element = $("searchResults");
+
+  const key = term
     .trim()
     .toLowerCase()
     .replace(/^@/, "");
 
-  container.innerHTML = "";
+  element.innerHTML = "";
 
-  if (term.length < 2) return;
+  if (key.length < 2) return;
 
   try {
-    const resultsQuery = query(
-      collection(db, "usernames"),
-      where("username", ">=", term),
-      where("username", "<=", term + "\uf8ff"),
-      limit(20)
+    const results = await getDocs(
+      query(
+        collection(db, "usernames"),
+        where("username", ">=", key),
+        where("username", "<=", key + "\uf8ff"),
+        limit(20)
+      )
     );
 
-    const snapshot = await getDocs(resultsQuery);
+    if (results.empty) {
+      element.innerHTML =
+        '<div class="empty-state">Pengguna tidak ditemukan.</div>';
 
-    if (snapshot.empty) {
-      container.innerHTML = `
-        <div class="empty-state">Pengguna tidak ditemukan.</div>
-      `;
       return;
     }
 
-    const profiles = await Promise.all(
-      snapshot.docs.map(async item => {
-        const uid = item.data().uid;
+    for (const document of results.docs) {
+      const uid = document.data().uid;
 
-        if (uid === currentUser.uid) return null;
+      if (uid === user.uid) continue;
 
-        const profileSnap = await getDoc(doc(db, "users", uid));
+      const profileSnap = await getDoc(
+        doc(db, "users", uid)
+      );
 
-        if (!profileSnap.exists()) return null;
+      if (!profileSnap.exists()) continue;
 
-        return {
-          uid,
-          ...profileSnap.data()
-        };
-      })
-    );
+      const data = profileSnap.data();
 
-    profiles.filter(Boolean).forEach(profile => {
       const button = document.createElement("button");
+
       button.className = "chat-item";
 
-      button.innerHTML = `
-        ${avatarHTML(profile.name || "U", profile.photoURL)}
-        <div class="chat-item-details">
-          <strong>${escapeHTML(profile.name || "Pengguna")}</strong>
-          <span>@${escapeHTML(profile.username || "")}</span>
-        </div>
-      `;
+      button.innerHTML =
+        avatar(data.name || "U", data.photoURL) +
+        `<div class="chat-item-details">
+          <strong>${esc(data.name || "Pengguna")}</strong>
+          <span>@${esc(data.username || "")}</span>
+        </div>`;
 
-      button.addEventListener("click", () => {
-        startPrivateChat(profile.uid);
-      });
+      button.onclick = () => startPrivate(uid);
 
-      container.appendChild(button);
-    });
-
+      element.append(button);
+    }
   } catch (error) {
-    console.error("Search users:", error);
     toast("Pencarian gagal: " + error.message);
   }
 }
 
-on("searchUser", "input", event => {
-  clearTimeout(searchDelay);
+on("newChatBtn", "click", () => {
+  $("searchUser").focus();
 
-  searchDelay = setTimeout(() => {
-    searchUsers(event.target.value);
-  }, 350);
+  toast("Cari username untuk memulai chat.");
 });
 
+/* =========================================
+   APPEALS
+========================================= */
 
-/* ==================================================
-   PRESENCE
-================================================== */
+on("appealBtn", "click", async () => {
+  const message = $("appealText").value.trim();
 
-function setupPresence() {
-  if (!currentUser) return;
-
-  const uid = currentUser.uid;
-  const connectedRef = dbRef(rtdb, ".info/connected");
-
-  const unsubscribe = onValue(connectedRef, async snapshot => {
-    if (snapshot.val() !== true || !currentUser || currentUser.uid !== uid) {
-      return;
-    }
-
-    const statusRef = dbRef(rtdb, `status/${uid}`);
-
-    try {
-      await onDisconnect(statusRef).set({
-        state: "offline",
-        lastChanged: rtdbTimestamp()
-      });
-
-      await set(statusRef, {
-        state: "online",
-        lastChanged: rtdbTimestamp()
-      });
-
-    } catch (error) {
-      console.warn("Presence setup:", error);
-    }
-  });
-
-  addListener(unsubscribe);
-}
-
-
-/* ==================================================
-   CHAT PRESENCE
-================================================== */
-
-function listenChatPresence(uid) {
-  if (!uid) return;
-
-  const statusRef = dbRef(rtdb, `status/${uid}`);
-
-  const unsubscribe = onValue(statusRef, snapshot => {
-    const data = snapshot.val();
-
-    if (!data) {
-      if ($("chatPresence")) {
-        $("chatPresence").textContent = "";
-      }
-      return;
-    }
-
-    if ($("chatPresence")) {
-      $("chatPresence").textContent =
-        data.state === "online"
-          ? "Online"
-          : formatLastSeen(data.lastChanged);
-    }
-  });
-
-  presenceListener = unsubscribe;
-  addConversationListener(unsubscribe);
-}
-
-
-/* ==================================================
-   ACCOUNT STATUS SCREENS
-================================================== */
-
-function showAccountStatus(status) {
-  hide($("appScreen"));
-  hide($("authScreen"));
-
-  hide($("holdScreen"));
-  hide($("recoveredScreen"));
-  hide($("permanentScreen"));
-
-  if (status === "hold") {
-    show($("holdScreen"));
-  } else if (status === "recovered") {
-    show($("recoveredScreen"));
-  } else if (status === "permanent") {
-    show($("permanentScreen"));
-  } else {
-    showAuth();
+  if (!message) {
+    return msg(
+      "appealMessage",
+      "Tulis alasan banding terlebih dahulu."
+    );
   }
-}
 
+  try {
+    await addDoc(collection(db, "appeals"), {
+      uid: user.uid,
+      username: profile.username || "",
+      message,
+      status: "pending",
+      createdAt: serverTimestamp()
+    });
 
-/* ==================================================
+    $("appealText").value = "";
+
+    msg(
+      "appealMessage",
+      "Banding berhasil dikirim."
+    );
+  } catch (error) {
+    msg(
+      "appealMessage",
+      "Gagal mengirim: " + error.message
+    );
+  }
+});
+
+/* =========================================
    ADMIN PANEL
-================================================== */
+========================================= */
 
-function openAdminPanel() {
-  if (currentUser?.uid !== ADMIN_UID) {
-    toast("Akses ditolak.");
-    return;
+function openAdmin() {
+  if (user?.uid !== ADMIN_UID) {
+    return toast("Akses ditolak.");
   }
 
-  show($("adminModal"));
+  show($("adminScreen"));
+
   loadAppeals();
 }
 
-on("openAdmin", "click", openAdminPanel);
-on("closeAdmin", "click", () => hide($("adminModal")));
+on("openAdmin", "click", openAdmin);
 
+on("closeAdmin", "click", () => {
+  hide($("adminScreen"));
+});
 
-/* ==================================================
-   ADMIN FIND USER
-================================================== */
+on("findAdminUser", "click", async () => {
+  if (user?.uid !== ADMIN_UID) return;
 
-on("adminSearchBtn", "click", async () => {
-  if (currentUser?.uid !== ADMIN_UID) return;
-
-  const username = $("adminUsername")?.value
-    .trim()
+  const username = $("adminSearch")
+    .value.trim()
     .toLowerCase()
     .replace(/^@/, "");
 
   if (!username) {
-    toast("Masukkan username.");
-    return;
+    return toast("Masukkan username.");
   }
 
   try {
@@ -2723,65 +2295,66 @@ on("adminSearchBtn", "click", async () => {
     );
 
     if (!usernameSnap.exists()) {
-      toast("Pengguna tidak ditemukan.");
-      return;
+      throw Error("Pengguna tidak ditemukan.");
     }
 
     const uid = usernameSnap.data().uid;
 
-    const profileSnap = await getDoc(doc(db, "users", uid));
+    const profileSnap = await getDoc(
+      doc(db, "users", uid)
+    );
 
     if (!profileSnap.exists()) {
-      toast("Profil tidak ditemukan.");
-      return;
+      throw Error("Profil tidak ditemukan.");
     }
 
-    const user = profileSnap.data();
+    const data = profileSnap.data();
 
-    if ($("adminUserResult")) {
-      $("adminUserResult").innerHTML = `
-        <div class="admin-user-card">
-          <strong>${escapeHTML(user.name || "Pengguna")}</strong>
-          <span>@${escapeHTML(user.username || "")}</span>
-          <span>${escapeHTML(user.email || "")}</span>
-          <span>Status: ${escapeHTML(user.status || "active")}</span>
-          <div class="admin-user-actions">
-            <button data-action="hold">Tahan akun</button>
-            <button data-action="active">Aktifkan</button>
-            <button data-action="permanent">Nonaktifkan permanen</button>
-          </div>
+    const element = $("adminUserResult");
+
+    element.innerHTML = `
+      <div class="admin-user-card">
+
+        <strong>${esc(data.name)}</strong>
+
+        <span>@${esc(data.username)}</span>
+
+        <span>${esc(data.email || "")}</span>
+
+        <span>Status: ${esc(data.status || "active")}</span>
+
+        <div class="admin-user-actions">
+          <button data-status="hold">Tahan akun</button>
+          <button data-status="active">Aktifkan</button>
+          <button data-status="permanent">Nonaktifkan permanen</button>
+          <button data-status="recovered">Pulihkan</button>
         </div>
-      `;
 
-      $("adminUserResult").dataset.uid = uid;
+      </div>
+    `;
 
-      $("adminUserResult")
-        .querySelectorAll("[data-action]")
-        .forEach(button => {
-          button.addEventListener("click", () => {
-            updateUserStatus(
-              uid,
-              button.dataset.action
-            );
-          });
-        });
-    }
-
+    element.querySelectorAll("[data-status]").forEach(button => {
+      button.onclick = () => {
+        updateUserStatus(
+          uid,
+          button.dataset.status
+        );
+      };
+    });
   } catch (error) {
-    console.error("Admin search:", error);
-    toast("Pencarian admin gagal: " + error.message);
+    toast(error.message);
   }
 });
 
-
-/* ==================================================
-   ADMIN UPDATE USER STATUS
-================================================== */
-
 async function updateUserStatus(uid, status) {
-  if (currentUser?.uid !== ADMIN_UID) return;
+  if (user?.uid !== ADMIN_UID) return;
 
-  const allowed = ["active", "hold", "permanent", "recovered"];
+  const allowed = [
+    "active",
+    "hold",
+    "permanent",
+    "recovered"
+  ];
 
   if (!allowed.includes(status)) return;
 
@@ -2789,173 +2362,120 @@ async function updateUserStatus(uid, status) {
     await updateDoc(doc(db, "users", uid), {
       status,
       statusUpdatedAt: serverTimestamp(),
-      statusUpdatedBy: currentUser.uid
+      statusUpdatedBy: user.uid
     });
 
     toast("Status akun diperbarui.");
-
   } catch (error) {
-    console.error("Update user status:", error);
-    toast("Gagal memperbarui status: " + error.message);
+    toast("Gagal memperbarui: " + error.message);
   }
 }
 
-
-/* ==================================================
-   APPEALS
-================================================== */
-
-on("submitAppealBtn", "click", async () => {
-  if (!currentUser) return;
-
-  const message = $("appealInput")?.value.trim();
-
-  if (!message) {
-    toast("Tulis alasan pengajuan terlebih dahulu.");
-    return;
-  }
-
-  try {
-    await addDoc(collection(db, "appeals"), {
-      uid: currentUser.uid,
-      username: currentProfile?.username || "",
-      message,
-      status: "pending",
-      createdAt: serverTimestamp()
-    });
-
-    $("appealInput").value = "";
-
-    toast("Pengajuan berhasil dikirim.");
-
-  } catch (error) {
-    console.error("Submit appeal:", error);
-    toast("Gagal mengirim pengajuan: " + error.message);
-  }
-});
-
-
-/* ==================================================
-   LOAD APPEALS FOR ADMIN
-================================================== */
-
 async function loadAppeals() {
-  if (currentUser?.uid !== ADMIN_UID) return;
+  if (user?.uid !== ADMIN_UID) return;
 
-  const container = $("appealsList");
-  if (!container) return;
+  const element = $("appealList");
 
-  container.innerHTML = "Memuat pengajuan...";
+  element.textContent = "Memuat...";
 
   try {
-    const appealsQuery = query(
-      collection(db, "appeals"),
-      where("status", "==", "pending"),
-      orderBy("createdAt", "desc"),
-      limit(50)
+    const results = await getDocs(
+      query(
+        collection(db, "appeals"),
+        where("status", "==", "pending"),
+        orderBy("createdAt", "desc"),
+        limit(50)
+      )
     );
 
-    const snapshot = await getDocs(appealsQuery);
+    element.innerHTML = "";
 
-    container.innerHTML = "";
-
-    if (snapshot.empty) {
-      container.innerHTML = `
-        <div class="empty-state">Tidak ada pengajuan baru.</div>
-      `;
+    if (results.empty) {
+      element.textContent = "Tidak ada pengajuan baru.";
       return;
     }
 
-    snapshot.docs.forEach(item => {
-      const appeal = item.data();
+    results.forEach(document => {
+      const data = document.data();
 
       const card = document.createElement("div");
+
       card.className = "appeal-card";
 
       card.innerHTML = `
-        <strong>@${escapeHTML(appeal.username || "pengguna")}</strong>
-        <p>${escapeHTML(appeal.message || "")}</p>
+        <strong>@${esc(data.username || "pengguna")}</strong>
+        <p>${esc(data.message || "")}</p>
         <button type="button">Tandai selesai</button>
       `;
 
-      card.querySelector("button").addEventListener("click", async () => {
+      card.querySelector("button").onclick = async () => {
         try {
-          await updateDoc(item.ref, {
+          await updateDoc(document.ref, {
             status: "reviewed",
-            reviewedBy: currentUser.uid,
+            reviewedBy: user.uid,
             reviewedAt: serverTimestamp()
           });
 
           card.remove();
-          toast("Pengajuan ditandai selesai.");
-
         } catch (error) {
-          toast("Gagal memperbarui pengajuan: " + error.message);
+          toast(error.message);
         }
-      });
+      };
 
-      container.appendChild(card);
+      element.append(card);
     });
-
   } catch (error) {
-    console.error("Load appeals:", error);
-    container.textContent = "Gagal memuat pengajuan.";
+    element.textContent =
+      "Gagal memuat pengajuan: " + error.message;
   }
 }
 
+/* =========================================
+   AUTH STATE
+========================================= */
 
-/* ==================================================
-   AUTH STATE LISTENER
-================================================== */
-
-onAuthStateChanged(auth, async user => {
+onAuthStateChanged(auth, async currentUser => {
   clearListeners();
 
-  currentUser = user;
-  currentProfile = null;
+  user = currentUser;
 
-  activeConversation = null;
-  activeConversationType = null;
+  profile = null;
+  activeId = null;
+  activeType = null;
 
-  if (!user) {
+  if (!currentUser) {
     showAuth();
-
-    hide($("profileModal"));
     hide($("phoneProfileModal"));
-    hide($("holdScreen"));
-    hide($("recoveredScreen"));
-    hide($("permanentScreen"));
-
     return;
   }
 
   try {
     let profileSnap = await getDoc(
-      doc(db, "users", user.uid)
+      doc(db, "users", currentUser.uid)
     );
 
-    if (!profileSnap.exists() && user.phoneNumber) {
-      const completed = await ensurePhoneProfile(user);
+    if (!profileSnap.exists() && currentUser.phoneNumber) {
+      const completed = await ensurePhoneProfile(currentUser);
 
       if (!completed) return;
 
       profileSnap = await getDoc(
-        doc(db, "users", user.uid)
+        doc(db, "users", currentUser.uid)
       );
     }
 
     if (!profileSnap.exists()) {
-      throw new Error(
+      throw Error(
         "Data profil tidak ditemukan. Silakan hubungi admin."
       );
     }
 
-    currentProfile = {
-      uid: user.uid,
+    profile = {
+      uid: currentUser.uid,
       ...profileSnap.data()
     };
 
-    const status = currentProfile.status || "active";
+    const status = profile.status || "active";
 
     if (status !== "active") {
       showAccountStatus(status);
@@ -2963,6 +2483,7 @@ onAuthStateChanged(auth, async user => {
     }
 
     showApp();
+
     renderProfile();
 
     setupPresence();
@@ -2973,21 +2494,13 @@ onAuthStateChanged(auth, async user => {
     listenStatuses();
 
     openPage("chatsPage");
-
   } catch (error) {
-    console.error("Auth state:", error);
+    console.error("Auth state", error);
 
     showAuth();
 
-    toast(
-      "Gagal memuat akun: " + error.message
-    );
+    toast("Gagal memuat akun: " + error.message);
   }
 });
 
-
-/* ==================================================
-   INITIALIZATION
-================================================== */
-
-console.log("ZORAAPP initialized successfully.");
+console.log("ZORAAPP initialized");
