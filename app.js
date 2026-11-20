@@ -1050,12 +1050,26 @@ async function createGroup() {
   const name = prompt("Nama grup:");
   if (!name?.trim()) return;
 
+  const memberText = prompt(
+    "Masukkan minimal 1 UID anggota tambahan, pisahkan dengan koma:"
+  );
+
+  if (!memberText?.trim()) {
+    toast("Tambahkan minimal 1 anggota grup.", "error");
+    return;
+  }
+
   try {
-    const memberText = prompt("UID anggota tambahan, pisahkan dengan koma (opsional):") || "";
     const members = [...new Set([
       user.uid,
-      ...memberText.split(",").map(value => value.trim()).filter(Boolean)
+      ...memberText.split(",")
+        .map(value => value.trim())
+        .filter(Boolean)
     ])];
+
+    if (members.length < 2) {
+      throw new Error("Grup harus memiliki minimal 2 anggota.");
+    }
 
     const ref = await addDoc(collection(db, "groups"), {
       name: name.trim(),
@@ -1063,20 +1077,25 @@ async function createGroup() {
       members,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      lastMessage: ""
+      lastMessage: "",
+      lastSenderId: ""
     });
 
     toast("Grup berhasil dibuat.");
-    openConversation(ref.id, {
+
+    await openConversation(ref.id, {
       type: "group",
       name: name.trim(),
       members,
       ownerId: user.uid
     });
+
   } catch (error) {
+    console.error("CREATE GROUP ERROR:", error);
     toast("Gagal membuat grup: " + error.message, "error");
   }
 }
+
 
 function listenGroups() {
   if (groupUnsubscribe) groupUnsubscribe();
