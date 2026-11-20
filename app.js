@@ -1849,4 +1849,1145 @@ function listenTyping(id, type) {
 
 on("messageInput", "input", () => {
   if (
-    ac
+    activeConversation &&
+    (activeConversationType === "private" ||
+     activeConversationType === "group")
+  ) {
+    updateTyping(activeConversation, activeConversationType);
+  }
+});
+
+
+/* ==================================================
+   GROUP LIST
+================================================== */
+
+function listenGroups() {
+  if (!currentUser) return;
+
+  const groupsQuery = query(
+    collection(db, "groups"),
+    where("members", "array-contains", currentUser.uid)
+  );
+
+  const unsubscribe = onSnapshot(groupsQuery, snapshot => {
+    const container = $("groupList");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    if (snapshot.empty) {
+      container.innerHTML = `
+        <div class="empty-state">Belum ada grup.</div>
+      `;
+      return;
+    }
+
+    snapshot.docs.forEach(item => {
+      const data = item.data();
+
+      const button = document.createElement("button");
+      button.className = "chat-item";
+
+      button.innerHTML = `
+        ${avatarHTML(data.name || "G")}
+        <div class="chat-item-details">
+          <strong>${escapeHTML(data.name || "Grup")}</strong>
+          <span>${escapeHTML(data.lastMessage || "Grup baru")}</span>
+        </div>
+      `;
+
+      button.addEventListener("click", () => {
+        openConversation(item.id, "group", {
+          name: data.name || "Grup",
+          ownerId: data.ownerId,
+          members: data.members || []
+        });
+      });
+
+      container.appendChild(button);
+    });
+
+  }, error => {
+    console.error("Listen groups:", error);
+    toast("Gagal memuat daftar grup.");
+  });
+
+  addListener(unsubscribe);
+}
+
+
+/* ==================================================
+   CREATE GROUP
+================================================== */
+
+on("createGroupBtn", "click", async () => {
+  if (!currentUser) return;
+
+  const name = prompt("Masukkan nama grup:");
+
+  if (!name?.trim()) return;
+
+  try {
+    const groupRef = await addDoc(collection(db, "groups"), {
+      name: name.trim(),
+      ownerId: currentUser.uid,
+      members: [currentUser.uid],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastMessage: ""
+    });
+
+    toast("Grup berhasil dibuat.");
+
+    openConversation(groupRef.id, "group", {
+      name: name.trim(),
+      ownerId: currentUser.uid,
+      members: [currentUser.uid]
+    });
+
+  } catch (error) {
+    console.error("Create group:", error);
+    toast("Gagal membuat grup: " + error.message);
+  }
+});
+
+
+/* ==================================================
+   INVITE GROUP MEMBER
+================================================== */
+
+on("inviteGroupMember", "click", async () => {
+  if (
+    !currentUser ||
+    !activeConversation ||
+    activeConversationType !== "group"
+  ) return;
+
+  const username = prompt("Masukkan username anggota:");
+
+  if (!username?.trim()) return;
+
+  try {
+    const groupRef = doc(db, "groups", activeConversation);
+    const groupSnap = await getDoc(groupRef);
+
+    if (!groupSnap.exists()) {
+      throw new Error("Grup tidak ditemukan.");
+    }
+
+    const group = groupSnap.data();
+
+    if (group.ownerId !== currentUser.uid) {
+      throw new Error("Hanya pemilik grup yang bisa mengundang anggota.");
+    }
+
+    const usernameSnap = await getDoc(
+      doc(db, "usernames", username.trim().toLowerCase())
+    );
+
+    if (!usernameSnap.exists()) {
+      throw new Error("Username tidak ditemukan.");
+    }
+
+    const targetUid = usernameSnap.data().uid;
+
+    if (targetUid === currentUser.uid) {
+      throw new Error("Kamu sudah menjadi anggota grup.");
+    }
+
+    await updateDoc(groupRef, {
+      members: arrayUnion(targetUid)
+    });
+
+    toast("Anggota berhasil ditambahkan.");
+
+  } catch (error) {
+    console.error("Invite group:", error);
+    toast(error.message);
+  }
+});
+
+
+/* ==================================================
+   CHANNEL LIST
+================================================== */
+
+function listenChannels() {
+  if (!currentUser) return;
+
+  const channelsQuery = query(
+    collection(db, "channels"),
+    orderBy("createdAt", "desc")
+  );
+
+  const unsubscribe = onSnapshot(channelsQuery, snapshot => {
+    const container = $("channelList");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    if (snapshot.empty) {
+      container.innerHTML = `
+        <div class="empty-state">Belum ada saluran.</div>
+      `;
+      return;
+    }
+
+    snapshot.docs.forEach(item => {
+      const data = item.data();
+
+      const button = document.createElement("button");
+      button.className = "chat-item";
+
+      button.innerHTML = `
+        ${avatarHTML(data.name || "S")}
+        <div class="channel-item-details">
+          <strong>${escapeHTML(data.name || "Saluran")}</strong>
+          <span>${Number(data.followerCount || 0)} PENGIKUT</span>
+        </div>
+      `;
+
+      button.addEventListener("click", () => {
+        openChannel(item.id);
+      });
+
+      container.appendChild(button);
+    });
+
+  }, error => {
+    console.error("Listen channels:", error);
+    toast("Gagal memuat saluran.");
+  });
+
+  addListener(unsubscribe);
+}
+
+
+/* ==================================================
+   OPEN CHANNEL
+================================================== */
+
+async function openChannel(id) {
+  if (!currentUser) return;
+
+  try {
+    const channelSnap = await getDoc(doc(db, "channels", id));
+
+    if (!channelSnap.exists()) {
+      toast("Saluran tidak ditemukan.");
+      return;
+    }
+
+    const channel = channelSnap.data();
+
+    const isOwner = channel.ownerId === currentUser.uid;
+
+    const followerSnap = await getDoc(
+      doc(db, "channels", id, "followers", currentUser.uid)
+    );
+
+    const isFollower = followerSnap.exists();
+
+    if (!isOwner && !isFollower) {
+      clearConversationListeners();
+
+      activeConversation = id;
+      activeConversationType = "channel";
+
+      show($("chatPanel"));
+      hide($("emptyChat"));
+
+      if ($("chatName")) {
+        $("chatName").textContent = channel.name || "Saluran";
+      }
+
+      if ($("channelFollowerCount")) {
+        $("channelFollowerCount").textContent =
+          `${Number(channel.followerCount || 0)} PENGIKUT`;
+      }
+
+      if ($("messages")) {
+        $("messages").innerHTML = `
+          <div class="empty-state">
+            Ikuti saluran ini untuk melihat postingannya.
+          </div>
+        `;
+      }
+
+      hide($("composer"));
+      hide($("channelComposer"));
+      show($("channelControls"));
+
+      if ($("followChannelBtn")) {
+        $("followChannelBtn").hidden = false;
+        $("followChannelBtn").textContent = "IKUTI SALURAN";
+      }
+
+      if ($("unfollowChannelBtn")) {
+        hide($("unfollowChannelBtn"));
+      }
+
+      return;
+    }
+
+    openConversation(id, "channel", {
+      name: channel.name || "Saluran",
+      ownerId: channel.ownerId,
+      isOwner,
+      followerCount: channel.followerCount || 0
+    });
+
+    if ($("followChannelBtn")) {
+      hide($("followChannelBtn"));
+    }
+
+    if ($("unfollowChannelBtn")) {
+      $("unfollowChannelBtn").hidden = isOwner;
+    }
+
+  } catch (error) {
+    console.error("Open channel:", error);
+    toast("Gagal membuka saluran: " + error.message);
+  }
+}
+
+
+/* ==================================================
+   FOLLOW CHANNEL
+================================================== */
+
+on("followChannelBtn", "click", async () => {
+  if (!currentUser || !activeConversation) return;
+
+  const channelId = activeConversation;
+
+  try {
+    const channelRef = doc(db, "channels", channelId);
+    const followerRef = doc(
+      db,
+      "channels",
+      channelId,
+      "followers",
+      currentUser.uid
+    );
+
+    await runTransaction(db, async transaction => {
+      const channelSnap = await transaction.get(channelRef);
+      const followerSnap = await transaction.get(followerRef);
+
+      if (!channelSnap.exists()) {
+        throw new Error("Saluran tidak ditemukan.");
+      }
+
+      if (followerSnap.exists()) return;
+
+      transaction.set(followerRef, {
+        uid: currentUser.uid,
+        name: currentProfile?.name || "Pengguna",
+        followedAt: serverTimestamp()
+      });
+
+      transaction.update(channelRef, {
+        followerCount: Number(channelSnap.data().followerCount || 0) + 1
+      });
+    });
+
+    toast("Berhasil mengikuti saluran.");
+    await openChannel(channelId);
+
+  } catch (error) {
+    console.error("Follow channel:", error);
+    toast("Gagal mengikuti saluran: " + error.message);
+  }
+});
+
+
+/* ==================================================
+   UNFOLLOW CHANNEL
+================================================== */
+
+on("unfollowChannelBtn", "click", async () => {
+  if (!currentUser || !activeConversation) return;
+
+  const channelId = activeConversation;
+
+  try {
+    const channelRef = doc(db, "channels", channelId);
+    const followerRef = doc(
+      db,
+      "channels",
+      channelId,
+      "followers",
+      currentUser.uid
+    );
+
+    await runTransaction(db, async transaction => {
+      const channelSnap = await transaction.get(channelRef);
+      const followerSnap = await transaction.get(followerRef);
+
+      if (!channelSnap.exists()) {
+        throw new Error("Saluran tidak ditemukan.");
+      }
+
+      if (!followerSnap.exists()) return;
+
+      transaction.delete(followerRef);
+
+      transaction.update(channelRef, {
+        followerCount: Math.max(
+          0,
+          Number(channelSnap.data().followerCount || 0) - 1
+        )
+      });
+    });
+
+    toast("Kamu berhenti mengikuti saluran.");
+
+    activeConversation = null;
+    activeConversationType = null;
+
+    hide($("chatPanel"));
+    show($("emptyChat"));
+
+  } catch (error) {
+    console.error("Unfollow channel:", error);
+    toast("Gagal berhenti mengikuti: " + error.message);
+  }
+});
+
+
+/* ==================================================
+   CREATE CHANNEL
+================================================== */
+
+on("createChannelBtn", "click", async () => {
+  if (!currentUser) return;
+
+  const name = prompt("Nama saluran:");
+
+  if (!name?.trim()) return;
+
+  const description = prompt("Deskripsi saluran:") || "";
+
+  try {
+    const channelRef = await addDoc(collection(db, "channels"), {
+      name: name.trim(),
+      description: description.trim(),
+      ownerId: currentUser.uid,
+      followerCount: 0,
+      createdAt: serverTimestamp()
+    });
+
+    toast("Saluran berhasil dibuat.");
+
+    openChannel(channelRef.id);
+
+  } catch (error) {
+    console.error("Create channel:", error);
+    toast("Gagal membuat saluran: " + error.message);
+  }
+});
+
+
+/* ==================================================
+   SEND CHANNEL POST
+================================================== */
+
+async function sendChannelPost(text = "", imageURL = "") {
+  if (
+    !currentUser ||
+    !activeConversation ||
+    activeConversationType !== "channel"
+  ) return;
+
+  const channelId = activeConversation;
+  const cleanText = String(text || "").trim();
+
+  if (!cleanText && !imageURL) return;
+
+  try {
+    const channelRef = doc(db, "channels", channelId);
+    const channelSnap = await getDoc(channelRef);
+
+    if (!channelSnap.exists()) {
+      throw new Error("Saluran tidak ditemukan.");
+    }
+
+    const channel = channelSnap.data();
+
+    if (channel.ownerId !== currentUser.uid) {
+      throw new Error("Hanya admin saluran yang bisa mengirim postingan.");
+    }
+
+    await addDoc(collection(db, "channels", channelId, "posts"), {
+      senderId: currentUser.uid,
+      senderName: currentProfile?.name || "Admin",
+      text: cleanText,
+      imageURL,
+      reactions: {},
+      createdAt: serverTimestamp()
+    });
+
+    await updateDoc(channelRef, {
+      updatedAt: serverTimestamp()
+    });
+
+    if ($("channelPostInput")) {
+      $("channelPostInput").value = "";
+    }
+
+  } catch (error) {
+    console.error("Channel post:", error);
+    toast("Gagal mengirim postingan: " + error.message);
+  }
+}
+
+on("sendChannelPostBtn", "click", () => {
+  sendChannelPost($("channelPostInput")?.value || "");
+});
+
+
+/* ==================================================
+   CHANNEL POST REACTIONS
+================================================== */
+
+on("channelReactionBtn", "click", () => {
+  if (
+    activeConversation &&
+    activeConversationType === "channel"
+  ) {
+    toast("Gunakan tombol + Reaksi pada postingan.");
+  }
+});
+
+
+/* ==================================================
+   STATUS LIST
+================================================== */
+
+function listenStatuses() {
+  if (!currentUser) return;
+
+  const statusesQuery = query(
+    collection(db, "statuses"),
+    orderBy("createdAt", "desc"),
+    limit(100)
+  );
+
+  const unsubscribe = onSnapshot(statusesQuery, snapshot => {
+    const container = $("statusList");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const now = Date.now();
+
+    const statuses = snapshot.docs
+      .map(item => ({
+        id: item.id,
+        ...item.data()
+      }))
+      .filter(status => {
+        const expiry = Number(status.expiresAt || 0);
+        return !expiry || expiry > now;
+      });
+
+    if (!statuses.length) {
+      container.innerHTML = `
+        <div class="empty-state">Belum ada status.</div>
+      `;
+      return;
+    }
+
+    statuses.forEach(status => {
+      const button = document.createElement("button");
+      button.className = "status-item";
+
+      button.innerHTML = `
+        ${avatarHTML(status.name || "U", status.photoURL)}
+        <div class="status-item-details">
+          <strong>${escapeHTML(status.name || "Pengguna")}</strong>
+          <span>${escapeHTML(status.text || "Status")}</span>
+        </div>
+      `;
+
+      button.addEventListener("click", () => {
+        showStatus(status);
+      });
+
+      container.appendChild(button);
+    });
+
+  }, error => {
+    console.error("Listen statuses:", error);
+    toast("Gagal memuat status.");
+  });
+
+  addListener(unsubscribe);
+}
+
+
+/* ==================================================
+   CREATE STATUS
+================================================== */
+
+on("createStatusBtn", "click", () => {
+  show($("statusModal"));
+});
+
+on("closeStatus", "click", () => {
+  hide($("statusModal"));
+});
+
+on("publishStatusBtn", "click", async () => {
+  if (!currentUser) return;
+
+  const text = $("statusInput")?.value.trim();
+
+  if (!text) {
+    toast("Isi status terlebih dahulu.");
+    return;
+  }
+
+  try {
+    await addDoc(collection(db, "statuses"), {
+      uid: currentUser.uid,
+      name: currentProfile?.name || "Pengguna",
+      photoURL: currentProfile?.photoURL || "",
+      text,
+      createdAt: serverTimestamp(),
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000
+    });
+
+    if ($("statusInput")) {
+      $("statusInput").value = "";
+    }
+
+    hide($("statusModal"));
+    toast("Status berhasil dibagikan.");
+
+  } catch (error) {
+    console.error("Publish status:", error);
+    toast("Gagal membagikan status: " + error.message);
+  }
+});
+
+
+/* ==================================================
+   VIEW STATUS
+================================================== */
+
+function showStatus(status) {
+  const modal = $("viewStatusModal");
+
+  if (!modal) {
+    toast(status.text || "Status");
+    return;
+  }
+
+  if ($("viewStatusName")) {
+    $("viewStatusName").textContent = status.name || "Pengguna";
+  }
+
+  if ($("viewStatusText")) {
+    $("viewStatusText").textContent = status.text || "";
+  }
+
+  show(modal);
+}
+
+on("closeViewStatus", "click", () => {
+  hide($("viewStatusModal"));
+});
+
+
+/* ==================================================
+   USER SEARCH
+================================================== */
+
+async function searchUsers(keyword) {
+  if (!currentUser) return;
+
+  const container = $("searchResults");
+  if (!container) return;
+
+  const term = String(keyword || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "");
+
+  container.innerHTML = "";
+
+  if (term.length < 2) return;
+
+  try {
+    const resultsQuery = query(
+      collection(db, "usernames"),
+      where("username", ">=", term),
+      where("username", "<=", term + "\uf8ff"),
+      limit(20)
+    );
+
+    const snapshot = await getDocs(resultsQuery);
+
+    if (snapshot.empty) {
+      container.innerHTML = `
+        <div class="empty-state">Pengguna tidak ditemukan.</div>
+      `;
+      return;
+    }
+
+    const profiles = await Promise.all(
+      snapshot.docs.map(async item => {
+        const uid = item.data().uid;
+
+        if (uid === currentUser.uid) return null;
+
+        const profileSnap = await getDoc(doc(db, "users", uid));
+
+        if (!profileSnap.exists()) return null;
+
+        return {
+          uid,
+          ...profileSnap.data()
+        };
+      })
+    );
+
+    profiles.filter(Boolean).forEach(profile => {
+      const button = document.createElement("button");
+      button.className = "chat-item";
+
+      button.innerHTML = `
+        ${avatarHTML(profile.name || "U", profile.photoURL)}
+        <div class="chat-item-details">
+          <strong>${escapeHTML(profile.name || "Pengguna")}</strong>
+          <span>@${escapeHTML(profile.username || "")}</span>
+        </div>
+      `;
+
+      button.addEventListener("click", () => {
+        startPrivateChat(profile.uid);
+      });
+
+      container.appendChild(button);
+    });
+
+  } catch (error) {
+    console.error("Search users:", error);
+    toast("Pencarian gagal: " + error.message);
+  }
+}
+
+on("searchUser", "input", event => {
+  clearTimeout(searchDelay);
+
+  searchDelay = setTimeout(() => {
+    searchUsers(event.target.value);
+  }, 350);
+});
+
+
+/* ==================================================
+   PRESENCE
+================================================== */
+
+function setupPresence() {
+  if (!currentUser) return;
+
+  const uid = currentUser.uid;
+  const connectedRef = dbRef(rtdb, ".info/connected");
+
+  const unsubscribe = onValue(connectedRef, async snapshot => {
+    if (snapshot.val() !== true || !currentUser || currentUser.uid !== uid) {
+      return;
+    }
+
+    const statusRef = dbRef(rtdb, `status/${uid}`);
+
+    try {
+      await onDisconnect(statusRef).set({
+        state: "offline",
+        lastChanged: rtdbTimestamp()
+      });
+
+      await set(statusRef, {
+        state: "online",
+        lastChanged: rtdbTimestamp()
+      });
+
+    } catch (error) {
+      console.warn("Presence setup:", error);
+    }
+  });
+
+  addListener(unsubscribe);
+}
+
+
+/* ==================================================
+   CHAT PRESENCE
+================================================== */
+
+function listenChatPresence(uid) {
+  if (!uid) return;
+
+  const statusRef = dbRef(rtdb, `status/${uid}`);
+
+  const unsubscribe = onValue(statusRef, snapshot => {
+    const data = snapshot.val();
+
+    if (!data) {
+      if ($("chatPresence")) {
+        $("chatPresence").textContent = "";
+      }
+      return;
+    }
+
+    if ($("chatPresence")) {
+      $("chatPresence").textContent =
+        data.state === "online"
+          ? "Online"
+          : formatLastSeen(data.lastChanged);
+    }
+  });
+
+  presenceListener = unsubscribe;
+  addConversationListener(unsubscribe);
+}
+
+
+/* ==================================================
+   ACCOUNT STATUS SCREENS
+================================================== */
+
+function showAccountStatus(status) {
+  hide($("appScreen"));
+  hide($("authScreen"));
+
+  hide($("holdScreen"));
+  hide($("recoveredScreen"));
+  hide($("permanentScreen"));
+
+  if (status === "hold") {
+    show($("holdScreen"));
+  } else if (status === "recovered") {
+    show($("recoveredScreen"));
+  } else if (status === "permanent") {
+    show($("permanentScreen"));
+  } else {
+    showAuth();
+  }
+}
+
+
+/* ==================================================
+   ADMIN PANEL
+================================================== */
+
+function openAdminPanel() {
+  if (currentUser?.uid !== ADMIN_UID) {
+    toast("Akses ditolak.");
+    return;
+  }
+
+  show($("adminModal"));
+  loadAppeals();
+}
+
+on("openAdmin", "click", openAdminPanel);
+on("closeAdmin", "click", () => hide($("adminModal")));
+
+
+/* ==================================================
+   ADMIN FIND USER
+================================================== */
+
+on("adminSearchBtn", "click", async () => {
+  if (currentUser?.uid !== ADMIN_UID) return;
+
+  const username = $("adminUsername")?.value
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "");
+
+  if (!username) {
+    toast("Masukkan username.");
+    return;
+  }
+
+  try {
+    const usernameSnap = await getDoc(
+      doc(db, "usernames", username)
+    );
+
+    if (!usernameSnap.exists()) {
+      toast("Pengguna tidak ditemukan.");
+      return;
+    }
+
+    const uid = usernameSnap.data().uid;
+
+    const profileSnap = await getDoc(doc(db, "users", uid));
+
+    if (!profileSnap.exists()) {
+      toast("Profil tidak ditemukan.");
+      return;
+    }
+
+    const user = profileSnap.data();
+
+    if ($("adminUserResult")) {
+      $("adminUserResult").innerHTML = `
+        <div class="admin-user-card">
+          <strong>${escapeHTML(user.name || "Pengguna")}</strong>
+          <span>@${escapeHTML(user.username || "")}</span>
+          <span>${escapeHTML(user.email || "")}</span>
+          <span>Status: ${escapeHTML(user.status || "active")}</span>
+          <div class="admin-user-actions">
+            <button data-action="hold">Tahan akun</button>
+            <button data-action="active">Aktifkan</button>
+            <button data-action="permanent">Nonaktifkan permanen</button>
+          </div>
+        </div>
+      `;
+
+      $("adminUserResult").dataset.uid = uid;
+
+      $("adminUserResult")
+        .querySelectorAll("[data-action]")
+        .forEach(button => {
+          button.addEventListener("click", () => {
+            updateUserStatus(
+              uid,
+              button.dataset.action
+            );
+          });
+        });
+    }
+
+  } catch (error) {
+    console.error("Admin search:", error);
+    toast("Pencarian admin gagal: " + error.message);
+  }
+});
+
+
+/* ==================================================
+   ADMIN UPDATE USER STATUS
+================================================== */
+
+async function updateUserStatus(uid, status) {
+  if (currentUser?.uid !== ADMIN_UID) return;
+
+  const allowed = ["active", "hold", "permanent", "recovered"];
+
+  if (!allowed.includes(status)) return;
+
+  try {
+    await updateDoc(doc(db, "users", uid), {
+      status,
+      statusUpdatedAt: serverTimestamp(),
+      statusUpdatedBy: currentUser.uid
+    });
+
+    toast("Status akun diperbarui.");
+
+  } catch (error) {
+    console.error("Update user status:", error);
+    toast("Gagal memperbarui status: " + error.message);
+  }
+}
+
+
+/* ==================================================
+   APPEALS
+================================================== */
+
+on("submitAppealBtn", "click", async () => {
+  if (!currentUser) return;
+
+  const message = $("appealInput")?.value.trim();
+
+  if (!message) {
+    toast("Tulis alasan pengajuan terlebih dahulu.");
+    return;
+  }
+
+  try {
+    await addDoc(collection(db, "appeals"), {
+      uid: currentUser.uid,
+      username: currentProfile?.username || "",
+      message,
+      status: "pending",
+      createdAt: serverTimestamp()
+    });
+
+    $("appealInput").value = "";
+
+    toast("Pengajuan berhasil dikirim.");
+
+  } catch (error) {
+    console.error("Submit appeal:", error);
+    toast("Gagal mengirim pengajuan: " + error.message);
+  }
+});
+
+
+/* ==================================================
+   LOAD APPEALS FOR ADMIN
+================================================== */
+
+async function loadAppeals() {
+  if (currentUser?.uid !== ADMIN_UID) return;
+
+  const container = $("appealsList");
+  if (!container) return;
+
+  container.innerHTML = "Memuat pengajuan...";
+
+  try {
+    const appealsQuery = query(
+      collection(db, "appeals"),
+      where("status", "==", "pending"),
+      orderBy("createdAt", "desc"),
+      limit(50)
+    );
+
+    const snapshot = await getDocs(appealsQuery);
+
+    container.innerHTML = "";
+
+    if (snapshot.empty) {
+      container.innerHTML = `
+        <div class="empty-state">Tidak ada pengajuan baru.</div>
+      `;
+      return;
+    }
+
+    snapshot.docs.forEach(item => {
+      const appeal = item.data();
+
+      const card = document.createElement("div");
+      card.className = "appeal-card";
+
+      card.innerHTML = `
+        <strong>@${escapeHTML(appeal.username || "pengguna")}</strong>
+        <p>${escapeHTML(appeal.message || "")}</p>
+        <button type="button">Tandai selesai</button>
+      `;
+
+      card.querySelector("button").addEventListener("click", async () => {
+        try {
+          await updateDoc(item.ref, {
+            status: "reviewed",
+            reviewedBy: currentUser.uid,
+            reviewedAt: serverTimestamp()
+          });
+
+          card.remove();
+          toast("Pengajuan ditandai selesai.");
+
+        } catch (error) {
+          toast("Gagal memperbarui pengajuan: " + error.message);
+        }
+      });
+
+      container.appendChild(card);
+    });
+
+  } catch (error) {
+    console.error("Load appeals:", error);
+    container.textContent = "Gagal memuat pengajuan.";
+  }
+}
+
+
+/* ==================================================
+   AUTH STATE LISTENER
+================================================== */
+
+onAuthStateChanged(auth, async user => {
+  clearListeners();
+
+  currentUser = user;
+  currentProfile = null;
+
+  activeConversation = null;
+  activeConversationType = null;
+
+  if (!user) {
+    showAuth();
+
+    hide($("profileModal"));
+    hide($("phoneProfileModal"));
+    hide($("holdScreen"));
+    hide($("recoveredScreen"));
+    hide($("permanentScreen"));
+
+    return;
+  }
+
+  try {
+    let profileSnap = await getDoc(
+      doc(db, "users", user.uid)
+    );
+
+    if (!profileSnap.exists() && user.phoneNumber) {
+      const completed = await ensurePhoneProfile(user);
+
+      if (!completed) return;
+
+      profileSnap = await getDoc(
+        doc(db, "users", user.uid)
+      );
+    }
+
+    if (!profileSnap.exists()) {
+      throw new Error(
+        "Data profil tidak ditemukan. Silakan hubungi admin."
+      );
+    }
+
+    currentProfile = {
+      uid: user.uid,
+      ...profileSnap.data()
+    };
+
+    const status = currentProfile.status || "active";
+
+    if (status !== "active") {
+      showAccountStatus(status);
+      return;
+    }
+
+    showApp();
+    renderProfile();
+
+    setupPresence();
+
+    listenChats();
+    listenGroups();
+    listenChannels();
+    listenStatuses();
+
+    openPage("chatsPage");
+
+  } catch (error) {
+    console.error("Auth state:", error);
+
+    showAuth();
+
+    toast(
+      "Gagal memuat akun: " + error.message
+    );
+  }
+});
+
+
+/* ==================================================
+   INITIALIZATION
+================================================== */
+
+console.log("ZORAAPP initialized successfully.");
