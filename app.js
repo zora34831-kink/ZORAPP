@@ -1398,7 +1398,7 @@ function renderMessages(messages) {
         );
     });
 
-    container.appendChild(node);
+        container.appendChild(node);
   });
 
   requestAnimationFrame(() => {
@@ -2219,7 +2219,8 @@ async function sendChannelPost() {
   if (!activeChat || activeChatType !== "channel") return;
 
   try {
-    const input = $("channelMessageInput");
+    // ID disesuaikan dengan index.html
+    const input = $("channelPostInput");
     const text = input?.value.trim();
 
     if (!text) return;
@@ -2522,7 +2523,7 @@ async function searchAdminUser() {
   if (!isAdmin()) return;
 
   const username = normalizeUsername(
-    $("adminSearchUsername")?.value
+    $("adminSearch")?.value
   );
 
   const container = $("adminUserResult");
@@ -2639,7 +2640,8 @@ async function enterApp() {
       listenAdminAppeals();
     }
 
-    showPage("chatPage");
+    // ID halaman yang benar di index.html
+    showPage("chatsPage");
   } catch (error) {
     logFirebaseError("ENTER APP ERROR", error);
     toast("Gagal membuka aplikasi: " + error.message, "error");
@@ -2690,7 +2692,7 @@ function bind(id, event, callback) {
 }
 
 function bindEvents() {
-  // Authentication
+  // AUTHENTICATION
   bind("loginBtn", "click", loginEmail);
   bind("registerBtn", "click", registerEmail);
   bind("forgotPassword", "click", forgotPassword);
@@ -2700,13 +2702,13 @@ function bindEvents() {
   bind("sendLinkPhoneOtp", "click", sendLinkPhoneOTP);
   bind("verifyLinkPhoneOtp", "click", verifyLinkPhoneOTP);
 
-  // Profile
-  bind("saveProfileBtn", "click", saveProfile);
+  // PROFILE
+  bind("saveProfile", "click", saveProfile);
   bind("logoutBtn", "click", logout);
+  bind("profileBtn", "click", () => openModal("profileModal"));
 
-  // Search
-  bind("searchUserBtn", "click", searchUsers);
-
+  // SEARCH
+  bind("findAdminUser", "click", searchAdminUser);
   bind("searchUser", "keydown", event => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -2719,8 +2721,8 @@ function bindEvents() {
     searchTimer = setTimeout(searchUsers, 450);
   });
 
-  // Message
-  bind("sendMessageBtn", "click", sendMessage);
+  // MESSAGE
+  bind("sendBtn", "click", sendMessage);
 
   bind("messageInput", "keydown", event => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -2748,7 +2750,7 @@ function bindEvents() {
     }
   });
 
-  // Navigation
+  // NAVIGATION
   document.querySelectorAll("[data-page]").forEach(button => {
     button.addEventListener("click", () => {
       showPage(button.dataset.page);
@@ -2758,45 +2760,54 @@ function bindEvents() {
   bind("backToChats", "click", closeChat);
   bind("hideChatBtn", "click", hideCurrentChat);
 
-  // Groups
+  // GROUPS
   bind("createGroupBtn", "click", createGroup);
   bind("inviteGroupMember", "click", inviteGroupMember);
 
-  // Channels
+  // CHANNELS
   bind("createChannelBtn", "click", createChannel);
-  bind("sendChannelPostBtn", "click", sendChannelPost);
+  bind("sendChannelPost", "click", sendChannelPost);
 
-  bind("channelMessageInput", "keydown", event => {
+  bind("channelPostInput", "keydown", event => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendChannelPost();
     }
   });
 
-  // Status
+  // STATUS
   bind("createStatusBtn", "click", createStatus);
-  bind("closeStatusViewer", "click", () => {
-    if ($("statusViewer")) $("statusViewer").hidden = true;
+
+  bind("closeViewStatus", "click", () => {
+    if ($("viewStatusModal")) {
+      $("viewStatusModal").hidden = true;
+    }
   });
 
-  // Admin
-  bind("adminSearchBtn", "click", searchAdminUser);
-  bind("submitAppealBtn", "click", submitAppeal);
+  // ADMIN
+  bind("findAdminUser", "click", searchAdminUser);
+  bind("appealBtn", "click", submitAppeal);
+  bind("openAdmin", "click", () => {
+    if (isAdmin()) openModal("adminScreen");
+  });
 
-  // Theme
-  bind("themeToggle", "click", setTheme);
+  // THEME
+  bind("themeBtn", "click", setTheme);
+  bind("settingsThemeBtn", "click", setTheme);
 
-  // Modals
+  // MODALS
   document.querySelectorAll("[data-close-modal]").forEach(button => {
     button.addEventListener("click", () => {
       closeModal(button.dataset.closeModal);
     });
   });
 
-  bind("openProfile", "click", () => openModal("profileModal"));
-  bind("openAdmin", "click", () => {
-    if (isAdmin()) showPage("adminPage");
-  });
+  bind("closeProfile", "click", () => closeModal("profileModal"));
+  bind("closeAdmin", "click", () => closeModal("adminScreen"));
+  bind("closeStatus", "click", () => closeModal("statusModal"));
+  bind("closeLinkPhone", "click", () => closeModal("linkPhoneModal"));
+  bind("linkPhoneBtn", "click", () => openModal("linkPhoneModal"));
+  bind("settingsLogoutBtn", "click", logout);
 }
 
 // =====================================
