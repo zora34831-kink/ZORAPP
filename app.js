@@ -10,8 +10,7 @@ import {
   updateProfile,
   RecaptchaVerifier,
   signInWithPhoneNumber,
-  PhoneAuthProvider,
-  linkWithCredential
+  linkWithPhoneNumber
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
 
 import {
@@ -55,7 +54,6 @@ import {
 ================================================== */
 
 const ADMIN_UID = "PbeBf6CtGLVWvX2RqnuvXBWyePG2";
-
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MESSAGE_LIMIT = 100;
 
@@ -70,10 +68,14 @@ let linkConfirmation = null;
 let linkRecaptcha = null;
 
 let listeners = [];
+let conversationListeners = [];
 let presenceListener = null;
 let typingTimer = null;
 let toastTimer = null;
+let searchDelay = null;
+
 let busy = false;
+let pendingProfilePromise = null;
 
 
 /* ==================================================
@@ -128,11 +130,40 @@ function setBusy(button, state, text) {
   button.disabled = state;
 
   if (state) {
-    button.dataset.oldText = button.textContent;
+    if (!button.dataset.oldText) {
+      button.dataset.oldText = button.textContent;
+    }
+
     button.textContent = text || "MEMPROSES...";
   } else {
     button.textContent = button.dataset.oldText || text || "LANJUTKAN";
+    delete button.dataset.oldText;
   }
+}
+
+function authErrorMessage(error) {
+  const messages = {
+    "auth/invalid-email": "Format email tidak valid.",
+    "auth/user-not-found": "Akun tidak ditemukan.",
+    "auth/wrong-password": "Password salah.",
+    "auth/invalid-credential": "Email atau password salah.",
+    "auth/email-already-in-use": "Email sudah digunakan.",
+    "auth/weak-password": "Password terlalu lemah.",
+    "auth/network-request-failed": "Periksa koneksi internet.",
+    "auth/too-many-requests": "Terlalu banyak percobaan. Coba lagi nanti.",
+    "auth/operation-not-allowed": "Metode login belum diaktifkan di Firebase.",
+    "auth/invalid-phone-number": "Nomor HP tidak valid.",
+    "auth/quota-exceeded": "Kuota SMS Firebase sudah tercapai.",
+    "auth/captcha-check-failed": "Verifikasi reCAPTCHA gagal.",
+    "auth/invalid-verification-code": "Kode OTP salah.",
+    "auth/code-expired": "Kode OTP kedaluwarsa.",
+    "auth/session-expired": "Sesi OTP berakhir. Kirim kode kembali.",
+    "auth/credential-already-in-use": "Nomor HP sudah terhubung ke akun lain.",
+    "auth/provider-already-linked": "Nomor HP sudah terhubung.",
+    "auth/invalid-verification-id": "Sesi verifikasi tidak valid."
+  };
+
+  return messages[error?.code] || error?.message || "Terjadi kesalahan.";
 }
 
 
@@ -143,6 +174,9 @@ function setBusy(button, state, text) {
 function showAuth() {
   show($("authScreen"));
   hide($("appScreen"));
+  hide($("holdScreen"));
+  hide($("recoveredScreen"));
+  hide($("permanentScreen"));
 }
 
 function showApp() {
@@ -156,11 +190,16 @@ function showApp() {
 function switchLoginTab(type) {
   const email = type === "email";
 
-  $("emailLoginPanel").hidden = !email;
-  $("phoneLoginPanel").hidden = email;
+  if ($("emailLoginPanel")) {
+    $("emailLoginPanel").hidden = !email;
+  }
 
-  $("emailLoginTab").classList.toggle("active", email);
-  $("phoneLoginTab").classList.toggle("active", !email);
+  if ($("phoneLoginPanel")) {
+    $("phoneLoginPanel").hidden = email;
+  }
+
+  $("emailLoginTab")?.classList.toggle("active", email);
+  $("phoneLoginTab")?.classList.toggle("active", !email);
 
   errorText("authError");
 }
@@ -176,8 +215,8 @@ on("phoneLoginTab", "click", () => switchLoginTab("phone"));
 async function handleLogin() {
   if (busy) return;
 
-  const email = $("authEmail").value.trim();
-  const password = $("authPassword").value;
+  const email = $("authEmail")?.value.trim();
+  const password = $("authPassword")?.value;
 
   if (!email || !password) {
     errorText("authError", "Masukkan email dan password.");
@@ -203,46 +242,16 @@ on("loginBtn", "click", handleLogin);
 
 
 /* ==================================================
-   AUTH ERROR MESSAGES
-================================================== */
-
-function authErrorMessage(error) {
-  const messages = {
-    "auth/invalid-email": "Format email tidak valid.",
-    "auth/user-not-found": "Akun tidak ditemukan.",
-    "auth/wrong-password": "Password salah.",
-    "auth/invalid-credential": "Email atau password salah.",
-    "auth/email-already-in-use": "Email sudah digunakan.",
-    "auth/weak-password": "Password terlalu lemah.",
-    "auth/network-request-failed": "Periksa koneksi internet.",
-    "auth/too-many-requests": "Terlalu banyak percobaan. Coba lagi nanti.",
-    "auth/operation-not-allowed": "Metode login belum diaktifkan di Firebase.",
-    "auth/invalid-phone-number": "Nomor HP tidak valid.",
-    "auth/quota-exceeded": "Kuota SMS Firebase sudah tercapai.",
-    "auth/captcha-check-failed": "Verifikasi reCAPTCHA gagal.",
-    "auth/invalid-verification-code": "Kode OTP salah.",
-    "auth/code-expired": "Kode OTP kedaluwarsa.",
-    "auth/session-expired": "Sesi OTP berakhir. Kirim kode kembali.",
-    "auth/credential-already-in-use": "Nomor HP sudah terhubung ke akun lain.",
-    "auth/provider-already-linked": "Nomor HP sudah terhubung.",
-    "auth/operation-not-supported-in-this-environment": "Operasi tidak didukung pada lingkungan ini."
-  };
-
-  return messages[error?.code] || error?.message || "Terjadi kesalahan.";
-}
-
-
-/* ==================================================
    REGISTRATION
 ================================================== */
 
 async function handleRegister() {
   if (busy) return;
 
-  const name = $("authName").value.trim();
-  const username = $("registerUsername").value.trim().toLowerCase();
-  const email = $("registerEmail").value.trim();
-  const password = $("registerPassword").value;
+  const name = $("authName")?.value.trim();
+  const username = $("registerUsername")?.value.trim().toLowerCase();
+  const email = $("registerEmail")?.value.trim();
+  const password = $("registerPassword")?.value;
 
   if (!name || !username || !email || !password) {
     errorText("registerError", "Lengkapi semua kolom.");
@@ -250,7 +259,10 @@ async function handleRegister() {
   }
 
   if (!/^[a-z0-9_]{3,20}$/.test(username)) {
-    errorText("registerError", "Username 3–20 karakter, hanya huruf, angka, dan underscore.");
+    errorText(
+      "registerError",
+      "Username 3–20 karakter, hanya huruf, angka, dan underscore."
+    );
     return;
   }
 
@@ -317,10 +329,15 @@ async function handleRegister() {
     if (createdUser) {
       try {
         await signOut(auth);
-      } catch {}
+      } catch (signOutError) {
+        console.warn("Sign out after registration error:", signOutError);
+      }
     }
 
-    errorText("registerError", error.message || authErrorMessage(error));
+    errorText(
+      "registerError",
+      error.message || authErrorMessage(error)
+    );
 
   } finally {
     busy = false;
@@ -336,7 +353,7 @@ on("registerBtn", "click", handleRegister);
 ================================================== */
 
 on("forgotPassword", "click", async () => {
-  const email = $("authEmail").value.trim();
+  const email = $("authEmail")?.value.trim();
 
   if (!email) {
     errorText("authError", "Masukkan email terlebih dahulu.");
@@ -353,7 +370,7 @@ on("forgotPassword", "click", async () => {
 
 
 /* ==================================================
-   PHONE OTP LOGIN
+   PHONE NUMBER HELPERS
 ================================================== */
 
 function normalizePhone(value) {
@@ -372,14 +389,30 @@ function resetRecaptcha() {
   try {
     recaptchaVerifier?.clear();
   } catch (error) {
-    console.warn(error);
+    console.warn("reCAPTCHA cleanup:", error);
   }
 
   recaptchaVerifier = null;
 }
 
-function createRecaptcha(container) {
-  return new RecaptchaVerifier(auth, container, {
+function resetLinkRecaptcha() {
+  try {
+    linkRecaptcha?.clear();
+  } catch (error) {
+    console.warn("Link reCAPTCHA cleanup:", error);
+  }
+
+  linkRecaptcha = null;
+}
+
+function createRecaptcha(containerId) {
+  const container = $(containerId);
+
+  if (!container) {
+    throw new Error(`Elemen ${containerId} tidak ditemukan di HTML.`);
+  }
+
+  return new RecaptchaVerifier(auth, containerId, {
     size: "normal",
     callback: () => {
       console.log("reCAPTCHA verified");
@@ -390,13 +423,21 @@ function createRecaptcha(container) {
   });
 }
 
+
+/* ==================================================
+   PHONE OTP LOGIN
+================================================== */
+
 async function sendPhoneOtp() {
   if (busy) return;
 
-  const phone = normalizePhone($("phoneNumber").value);
+  const phone = normalizePhone($("phoneNumber")?.value);
 
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-    errorText("authError", "Gunakan format nomor internasional, contoh +6281234567890.");
+    errorText(
+      "authError",
+      "Gunakan format nomor internasional, contoh +6281234567890."
+    );
     return;
   }
 
@@ -422,7 +463,10 @@ async function sendPhoneOtp() {
 
   } catch (error) {
     console.error("OTP send error:", error);
+
     resetRecaptcha();
+    confirmationResult = null;
+
     errorText("authError", authErrorMessage(error));
 
   } finally {
@@ -440,43 +484,60 @@ on("sendPhoneOtp", "click", sendPhoneOtp);
 
 let pendingPhoneUser = null;
 
-async function ensurePhoneProfile(user) {
-  const userRef = doc(db, "users", user.uid);
-  const snapshot = await getDoc(userRef);
-
-  if (snapshot.exists()) {
-    return snapshot.data();
+function ensurePhoneProfile(user) {
+  if (pendingProfilePromise) {
+    return pendingProfilePromise;
   }
 
   pendingPhoneUser = user;
 
-  show($("authScreen"));
-  show($("phoneProfileModal"));
-
-  return new Promise((resolve, reject) => {
+  pendingProfilePromise = new Promise(resolve => {
+    const modal = $("phoneProfileModal");
     const button = $("completePhoneProfile");
 
-    const handler = async () => {
+    if (!modal || !button) {
+      pendingProfilePromise = null;
+      resolve(false);
+      throw new Error("Modal profil nomor HP tidak ditemukan di HTML.");
+    }
+
+    show($("authScreen"));
+    show(modal);
+
+    errorText("phoneProfileError");
+
+    button.onclick = async () => {
       if (busy) return;
 
-      const name = $("phoneProfileName").value.trim();
-      const username = $("phoneProfileUsername").value.trim().toLowerCase();
+      const name = $("phoneProfileName")?.value.trim();
+      const username = $("phoneProfileUsername")?.value.trim().toLowerCase();
 
-      if (!name || !/^[a-z0-9_]{3,20}$/.test(username)) {
-        errorText("phoneProfileError", "Nama dan username valid wajib diisi.");
+      if (!name || !/^[a-z0-9_]{3,20}$/.test(username || "")) {
+        errorText(
+          "phoneProfileError",
+          "Isi nama dan username 3–20 karakter (huruf, angka, underscore)."
+        );
         return;
       }
 
       busy = true;
       setBusy(button, true, "MENYIMPAN...");
+      errorText("phoneProfileError");
 
       try {
         await runTransaction(db, async transaction => {
           const usernameRef = doc(db, "usernames", username);
+          const userRef = doc(db, "users", user.uid);
+
           const usernameSnap = await transaction.get(usernameRef);
+          const userSnap = await transaction.get(userRef);
+
+          if (userSnap.exists()) {
+            return;
+          }
 
           if (usernameSnap.exists()) {
-            throw new Error("Username sudah digunakan.");
+            throw new Error("Username sudah digunakan. Pilih username lain.");
           }
 
           transaction.set(usernameRef, {
@@ -504,23 +565,36 @@ async function ensurePhoneProfile(user) {
           displayName: name
         });
 
-        hide($("phoneProfileModal"));
+        const profileSnap = await getDoc(doc(db, "users", user.uid));
+
+        if (!profileSnap.exists()) {
+          throw new Error("Profil belum berhasil dibuat. Coba lagi.");
+        }
+
+        currentProfile = {
+          uid: user.uid,
+          ...profileSnap.data()
+        };
+
+        hide(modal);
         pendingPhoneUser = null;
 
-        resolve(true);
+        const finish = resolve;
+        pendingProfilePromise = null;
+        finish(true);
 
       } catch (error) {
-        errorText("phoneProfileError", error.message);
-        reject(error);
+        console.error("Phone profile:", error);
+        errorText("phoneProfileError", error.message || "Gagal menyimpan profil.");
 
       } finally {
         busy = false;
         setBusy(button, false);
       }
     };
-
-    button.onclick = handler;
   });
+
+  return pendingProfilePromise;
 }
 
 
@@ -531,9 +605,9 @@ async function ensurePhoneProfile(user) {
 async function verifyPhoneOtp() {
   if (!confirmationResult || busy) return;
 
-  const code = $("phoneOtp").value.trim();
+  const code = $("phoneOtp")?.value.trim();
 
-  if (!/^\d{6}$/.test(code)) {
+  if (!/^\d{6}$/.test(code || "")) {
     errorText("authError", "Masukkan kode OTP 6 digit.");
     return;
   }
@@ -543,19 +617,18 @@ async function verifyPhoneOtp() {
   errorText("authError");
 
   try {
-    const result = await confirmationResult.confirm(code);
-
-    const profileRef = doc(db, "users", result.user.uid);
-const profileSnap = await getDoc(profileRef);
-
-if (!profileSnap.exists()) {
-  await ensurePhoneProfile(result.user);
-}
+    await confirmationResult.confirm(code);
 
     confirmationResult = null;
     resetRecaptcha();
 
     toast("Nomor HP berhasil diverifikasi.");
+
+    /*
+      Pembuatan profil ditangani oleh onAuthStateChanged.
+      Jangan panggil ensurePhoneProfile di sini agar tidak
+      terjadi dua proses pembuatan profil secara bersamaan.
+    */
 
   } catch (error) {
     console.error("OTP verification error:", error);
@@ -575,8 +648,15 @@ on("verifyPhoneOtp", "click", verifyPhoneOtp);
 ================================================== */
 
 on("resendPhoneOtp", "click", async () => {
-  $("phoneNumber").readOnly = false;
-  $("phoneOtp").value = "";
+  if (busy) return;
+
+  if ($("phoneNumber")) {
+    $("phoneNumber").readOnly = false;
+  }
+
+  if ($("phoneOtp")) {
+    $("phoneOtp").value = "";
+  }
 
   hide($("otpPanel"));
 
@@ -588,7 +668,7 @@ on("resendPhoneOtp", "click", async () => {
 
 
 /* ==================================================
-   PROFILE
+   PROFILE DATA
 ================================================== */
 
 async function loadProfile(uid) {
@@ -607,34 +687,46 @@ async function loadProfile(uid) {
 }
 
 function renderProfile() {
-  if (!currentProfile) return;
+  if (!currentProfile || !currentUser) return;
 
   const name = currentProfile.name || "Pengguna";
   const username = currentProfile.username || "";
   const photo = currentProfile.photoURL || "";
 
-  $("myName").textContent = name;
-  $("myEmail").textContent = currentProfile.email || "";
-  $("myPhone").textContent = currentProfile.phoneNumber || "";
+  if ($("myName")) $("myName").textContent = name;
+  if ($("myEmail")) $("myEmail").textContent = currentProfile.email || "";
+  if ($("myPhone")) $("myPhone").textContent = currentProfile.phoneNumber || "";
 
-  $("myAvatar").textContent = name.charAt(0).toUpperCase();
-  $("chatAvatar").textContent = name.charAt(0).toUpperCase();
+  if ($("myAvatar")) {
+    $("myAvatar").textContent = name.charAt(0).toUpperCase();
+    $("myAvatar").style.backgroundImage = photo
+      ? `url("${photo}")`
+      : "none";
 
-  if (photo) {
-    $("myAvatar").style.backgroundImage = `url("${photo}")`;
-    $("myAvatar").classList.add("has-photo");
+    $("myAvatar").classList.toggle("has-photo", Boolean(photo));
   }
 
-  $("openAdmin").hidden = currentUser.uid !== ADMIN_UID;
+  if ($("chatAvatar")) {
+    $("chatAvatar").textContent = name.charAt(0).toUpperCase();
+  }
 
-  $("profileName").value = name;
-  $("profileUsername").value = username;
-  $("profileBio").value = currentProfile.bio || "";
+  if ($("openAdmin")) {
+    $("openAdmin").hidden = currentUser.uid !== ADMIN_UID;
+  }
 
-  $("profilePhotoPreview").textContent = name.charAt(0).toUpperCase();
-  $("profilePhotoPreview").style.backgroundImage = photo
-    ? `url("${photo}")`
-    : "none";
+  if ($("profileName")) $("profileName").value = name;
+  if ($("profileUsername")) $("profileUsername").value = username;
+  if ($("profileBio")) $("profileBio").value = currentProfile.bio || "";
+
+  if ($("profilePhotoPreview")) {
+    $("profilePhotoPreview").textContent = photo
+      ? ""
+      : name.charAt(0).toUpperCase();
+
+    $("profilePhotoPreview").style.backgroundImage = photo
+      ? `url("${photo}")`
+      : "none";
+  }
 }
 
 
@@ -656,7 +748,16 @@ on("closeProfile", "click", () => {
   hide($("profileModal"));
 });
 
+
+/* ==================================================
+   IMAGE UPLOAD
+================================================== */
+
 async function uploadImage(file, folder) {
+  if (!currentUser) {
+    throw new Error("Kamu belum login.");
+  }
+
   if (!file || !file.type.startsWith("image/")) {
     throw new Error("File harus berupa gambar.");
   }
@@ -665,7 +766,8 @@ async function uploadImage(file, folder) {
     throw new Error("Ukuran gambar maksimal 5 MB.");
   }
 
-  const path = `${folder}/${currentUser.uid}/${Date.now()}_${file.name}`;
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${folder}/${currentUser.uid}/${Date.now()}_${safeName}`;
   const imageRef = storageRef(storage, path);
 
   await uploadBytes(imageRef, file);
@@ -675,19 +777,39 @@ async function uploadImage(file, folder) {
 
 on("profilePhotoInput", "change", event => {
   const file = event.target.files?.[0];
-  if (!file) return;
+
+  if (!file || !$("profilePhotoPreview")) return;
+
+  if (!file.type.startsWith("image/")) {
+    toast("Pilih file gambar.");
+    event.target.value = "";
+    return;
+  }
+
+  if (file.size > MAX_IMAGE_SIZE) {
+    toast("Ukuran gambar maksimal 5 MB.");
+    event.target.value = "";
+    return;
+  }
+
+  const previewURL = URL.createObjectURL(file);
 
   $("profilePhotoPreview").style.backgroundImage =
-    `url("${URL.createObjectURL(file)}")`;
+    `url("${previewURL}")`;
 
   $("profilePhotoPreview").textContent = "";
 });
 
-on("saveProfile", "click", async () => {
-  if (busy) return;
 
-  const name = $("profileName").value.trim();
-  const bio = $("profileBio").value.trim();
+/* ==================================================
+   SAVE PROFILE
+================================================== */
+
+on("saveProfile", "click", async () => {
+  if (busy || !currentUser || !currentProfile) return;
+
+  const name = $("profileName")?.value.trim();
+  const bio = $("profileBio")?.value.trim();
 
   if (!name) {
     toast("Nama tidak boleh kosong.");
@@ -700,7 +822,7 @@ on("saveProfile", "click", async () => {
   try {
     let photoURL = currentProfile.photoURL || "";
 
-    const file = $("profilePhotoInput").files?.[0];
+    const file = $("profilePhotoInput")?.files?.[0];
 
     if (file) {
       photoURL = await uploadImage(file, "profiles");
@@ -721,12 +843,16 @@ on("saveProfile", "click", async () => {
     await loadProfile(currentUser.uid);
     renderProfile();
 
+    if ($("profilePhotoInput")) {
+      $("profilePhotoInput").value = "";
+    }
+
     hide($("profileModal"));
     toast("Profil berhasil diperbarui.");
 
   } catch (error) {
-    console.error(error);
-    toast(error.message);
+    console.error("Save profile:", error);
+    toast("Gagal menyimpan profil: " + error.message);
 
   } finally {
     busy = false;
@@ -736,23 +862,20 @@ on("saveProfile", "click", async () => {
 
 
 /* ==================================================
-   PHONE NUMBER LINKING
+   LINK PHONE NUMBER TO EXISTING ACCOUNT
 ================================================== */
 
 on("linkPhoneBtn", "click", () => {
   show($("linkPhoneModal"));
 });
 
-function resetLinkRecaptcha() {
-  try {
-    linkRecaptcha?.clear();
-  } catch {}
-
-  linkRecaptcha = null;
-}
-
 on("sendLinkPhoneOtp", "click", async () => {
-  const phone = normalizePhone($("linkPhoneNumber").value);
+  if (!currentUser) {
+    errorText("linkPhoneError", "Kamu belum login.");
+    return;
+  }
+
+  const phone = normalizePhone($("linkPhoneNumber")?.value);
 
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
     errorText("linkPhoneError", "Nomor HP tidak valid.");
@@ -764,46 +887,51 @@ on("sendLinkPhoneOtp", "click", async () => {
 
     linkRecaptcha = createRecaptcha("link-recaptcha-container");
 
-    linkConfirmation = await signInWithPhoneNumber(
-      auth,
+    /*
+      linkWithPhoneNumber mempertahankan akun yang sedang login.
+      signInWithPhoneNumber akan mencoba login sebagai akun baru.
+    */
+
+    linkConfirmation = await linkWithPhoneNumber(
+      currentUser,
       phone,
       linkRecaptcha
     );
 
     show($("linkPhoneOtpPanel"));
+    errorText("linkPhoneError");
 
-    toast("SMS OTP dikirim.");
+    toast("SMS OTP untuk menautkan nomor berhasil dikirim.");
 
   } catch (error) {
+    console.error("Link phone send:", error);
     errorText("linkPhoneError", authErrorMessage(error));
     resetLinkRecaptcha();
   }
 });
 
+
+/* ==================================================
+   VERIFY LINK PHONE OTP
+================================================== */
+
 on("verifyLinkPhoneOtp", "click", async () => {
-  if (!linkConfirmation) return;
+  if (!linkConfirmation || !currentUser) return;
 
-  const code = $("linkPhoneOtp").value.trim();
+  const code = $("linkPhoneOtp")?.value.trim();
 
-  if (!/^\d{6}$/.test(code)) {
+  if (!/^\d{6}$/.test(code || "")) {
     errorText("linkPhoneError", "Kode OTP harus 6 digit.");
     return;
   }
 
   try {
     /*
-      Untuk menautkan nomor HP ke akun yang sedang login,
-      gunakan PhoneAuthProvider dan linkWithCredential.
+      Konfirmasi ini menautkan nomor ke akun yang sedang login.
     */
 
-    const verificationId = linkConfirmation.verificationId;
-
-    const credential = PhoneAuthProvider.credential(
-      verificationId,
-      code
-    );
-
-    await linkWithCredential(currentUser, credential);
+    const credential = await linkConfirmation.confirm(code);
+    currentUser = credential.user;
 
     await updateDoc(doc(db, "users", currentUser.uid), {
       phoneNumber: currentUser.phoneNumber || "",
@@ -813,12 +941,16 @@ on("verifyLinkPhoneOtp", "click", async () => {
     await loadProfile(currentUser.uid);
     renderProfile();
 
+    linkConfirmation = null;
+    resetLinkRecaptcha();
+
     hide($("linkPhoneModal"));
+    hide($("linkPhoneOtpPanel"));
 
     toast("Nomor HP berhasil ditautkan.");
 
   } catch (error) {
-    console.error(error);
+    console.error("Link phone verify:", error);
     errorText("linkPhoneError", authErrorMessage(error));
   }
 });
@@ -831,15 +963,29 @@ on("verifyLinkPhoneOtp", "click", async () => {
 async function logout() {
   try {
     clearListeners();
+
+    if (currentUser) {
+      await remove(dbRef(rtdb, `status/${currentUser.uid}`)).catch(() => {});
+    }
+
     await signOut(auth);
 
     currentUser = null;
     currentProfile = null;
+    activeConversation = null;
+    activeConversationType = null;
+
+    confirmationResult = null;
+    linkConfirmation = null;
+
+    resetRecaptcha();
+    resetLinkRecaptcha();
 
     showAuth();
 
   } catch (error) {
-    toast(error.message);
+    console.error("Logout:", error);
+    toast("Gagal keluar: " + error.message);
   }
 }
 
@@ -860,7 +1006,44 @@ function addListener(unsubscribe) {
   }
 }
 
+function addConversationListener(unsubscribe) {
+  if (typeof unsubscribe === "function") {
+    conversationListeners.push(unsubscribe);
+  }
+}
+
+function clearConversationListeners() {
+  conversationListeners.forEach(unsubscribe => {
+    try {
+      unsubscribe();
+    } catch (error) {
+      console.warn("Conversation listener cleanup:", error);
+    }
+  });
+
+  conversationListeners = [];
+
+  clearTimeout(typingTimer);
+  typingTimer = null;
+
+  if (activeConversation && activeConversationType && currentUser) {
+    stopTyping(activeConversation, activeConversationType).catch(() => {});
+  }
+
+  if (presenceListener) {
+    try {
+      presenceListener();
+    } catch (error) {
+      console.warn(error);
+    }
+
+    presenceListener = null;
+  }
+}
+
 function clearListeners() {
+  clearConversationListeners();
+
   listeners.forEach(unsubscribe => {
     try {
       unsubscribe();
@@ -871,14 +1054,8 @@ function clearListeners() {
 
   listeners = [];
 
-  if (presenceListener) {
-    presenceListener();
-    presenceListener = null;
-  }
-
   if (currentUser) {
-    remove(dbRef(rtdb, `status/${currentUser.uid}/typing`))
-      .catch(() => {});
+    remove(dbRef(rtdb, `status/${currentUser.uid}/typing`)).catch(() => {});
   }
 }
 
@@ -889,17 +1066,25 @@ function clearListeners() {
 
 function openPage(pageId) {
   document.querySelectorAll(".page").forEach(page => {
-    page.hidden = page.id !== pageId;
     page.classList.toggle("active", page.id === pageId);
   });
 
   document.querySelectorAll(".nav-button[data-page]").forEach(button => {
-    button.classList.toggle("active", button.dataset.page === pageId);
+    button.classList.toggle(
+      "active",
+      button.dataset.page === pageId
+    );
   });
 
-  if (window.innerWidth <= 800) {
-    hide($("chatPanel"));
-    show($("emptyChat"));
+  const chatPanel = $("chatPanel");
+  const emptyChat = $("emptyChat");
+
+  if (pageId !== "chatsPage") {
+    hide(chatPanel);
+    show(emptyChat);
+  } else if (window.innerWidth <= 760) {
+    hide(chatPanel);
+    show(emptyChat);
   }
 }
 
@@ -909,45 +1094,60 @@ document.querySelectorAll(".nav-button[data-page]").forEach(button => {
   });
 });
 
+
+/* ==================================================
+   THEME
+================================================== */
+
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+
+  try {
+    localStorage.setItem("zora-theme", theme);
+  } catch (error) {
+    console.warn("Theme storage unavailable:", error);
+  }
+
+  const label = theme === "light" ? "Mode Terang" : "Mode Gelap";
+
+  if ($("themeLabel")) {
+    $("themeLabel").textContent = label;
+  }
+}
+
+try {
+  setTheme(localStorage.getItem("zora-theme") || "dark");
+} catch {
+  setTheme("dark");
+}
+
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme || "dark";
+  setTheme(current === "dark" ? "light" : "dark");
+}
+
 on("themeBtn", "click", toggleTheme);
 on("settingsThemeBtn", "click", toggleTheme);
 
-function toggleTheme() {
-  const light = document.body.classList.toggle("theme-light");
-
-  document.body.classList.toggle("theme-dark", !light);
-
-  localStorage.setItem("zora-theme", light ? "light" : "dark");
-}
-
-(function restoreTheme() {
-  const theme = localStorage.getItem("zora-theme");
-
-  if (theme === "light") {
-    document.body.classList.add("theme-light");
-    document.body.classList.remove("theme-dark");
-  }
-})();
-
 
 /* ==================================================
-   AVATAR HELPERS
+   AVATAR AND DATE HELPERS
 ================================================== */
 
-function avatarHTML(name, photoURL = "") {
-  const safeName = escapeHTML(name || "U");
+function avatarHTML(name = "U", photoURL = "", className = "") {
+  const initial = escapeHTML(name.charAt(0).toUpperCase());
 
   if (photoURL) {
     return `
-      <div class="avatar avatar-image">
-        <img src="${escapeHTML(photoURL)}" alt="${safeName}">
+      <div class="avatar ${className}"
+           style="background-image:url('${escapeHTML(photoURL)}')">
       </div>
     `;
   }
 
   return `
-    <div class="avatar">
-      ${safeName.charAt(0).toUpperCase()}
+    <div class="avatar ${className}">
+      ${initial}
     </div>
   `;
 }
@@ -974,6 +1174,8 @@ function formatLastSeen(timestamp) {
     ? timestamp.toDate()
     : new Date(timestamp);
 
+  if (Number.isNaN(date.getTime())) return "";
+
   return "Terakhir dilihat " + date.toLocaleString("id-ID", {
     day: "numeric",
     month: "short",
@@ -982,38 +1184,57 @@ function formatLastSeen(timestamp) {
   });
 }
 
+function getTimestamp(value) {
+  if (!value) return 0;
 
-/* ==================================================
-   PRIVATE CHAT
-================================================== */
+  if (typeof value.toMillis === "function") {
+    return value.toMillis();
+  }
 
-function makeChatId(uidA, uidB) {
-  return [uidA, uidB].sort().join("_");
+  if (typeof value.toDate === "function") {
+    return value.toDate().getTime();
+  }
+
+  return new Date(value).getTime() || 0;
 }
 
-async function startPrivateChat(targetUid) {
-  if (!currentUser || targetUid === currentUser.uid) return;
+
+/* ==================================================
+   PRIVATE CHAT ID
+================================================== */
+
+function makeChatId(uid1, uid2) {
+  return [uid1, uid2].sort().join("_");
+}
+
+
+/* ==================================================
+   START PRIVATE CHAT
+================================================== */
+
+async function startPrivateChat(uid) {
+  if (!currentUser || !uid || uid === currentUser.uid) return;
 
   try {
-    const targetSnap = await getDoc(doc(db, "users", targetUid));
+    const profileSnap = await getDoc(doc(db, "users", uid));
 
-    if (!targetSnap.exists()) {
+    if (!profileSnap.exists()) {
       toast("Pengguna tidak ditemukan.");
       return;
     }
 
-    const target = targetSnap.data();
+    const target = profileSnap.data();
+    const chatId = makeChatId(currentUser.uid, uid);
 
-    const chatId = makeChatId(currentUser.uid, targetUid);
     const chatRef = doc(db, "chats", chatId);
     const chatSnap = await getDoc(chatRef);
 
     if (!chatSnap.exists()) {
       await setDoc(chatRef, {
-        members: [currentUser.uid, targetUid].sort(),
+        members: [currentUser.uid, uid],
         memberNames: {
-          [currentUser.uid]: currentProfile.name,
-          [targetUid]: target.name
+          [currentUser.uid]: currentProfile?.name || "Pengguna",
+          [uid]: target.name || "Pengguna"
         },
         type: "private",
         createdAt: serverTimestamp(),
@@ -1023,115 +1244,107 @@ async function startPrivateChat(targetUid) {
     }
 
     openConversation(chatId, "private", {
-      name: target.name,
-      photoURL: target.photoURL || "",
-      uid: targetUid
+      uid,
+      name: target.name || "Pengguna",
+      username: target.username || "",
+      photoURL: target.photoURL || ""
     });
 
-    openPage("chatsPage");
-
   } catch (error) {
-    console.error("Start chat:", error);
-    toast("Gagal membuka chat: " + error.message);
+    console.error("Start private chat:", error);
+    toast("Tidak bisa membuka chat: " + error.message);
   }
 }
+
+
+/* ==================================================
+   CHAT LIST
+================================================== */
 
 function listenChats() {
   if (!currentUser) return;
 
-  const q = query(
+  const chatsQuery = query(
     collection(db, "chats"),
     where("members", "array-contains", currentUser.uid)
   );
 
-  const unsubscribe = onSnapshot(q, async snapshot => {
-    const list = $("chatList");
-    if (!list) return;
+  const unsubscribe = onSnapshot(chatsQuery, async snapshot => {
+    if (!currentUser) return;
 
-    list.innerHTML = "";
-
-    if (snapshot.empty) {
-      list.innerHTML = `
-        <div class="empty-list">
-          Belum ada percakapan.
-        </div>
-      `;
-      return;
-    }
-
-    const items = [];
-
-    for (const item of snapshot.docs) {
+    const chats = await Promise.all(snapshot.docs.map(async item => {
       const data = item.data();
 
       const otherUid = (data.members || []).find(
         uid => uid !== currentUser.uid
       );
 
-      if (!otherUid) continue;
-
-      let other = data.memberNames?.[otherUid]
-        ? { name: data.memberNames[otherUid] }
-        : null;
+      if (!otherUid) return null;
 
       try {
-        const userSnap = await getDoc(doc(db, "users", otherUid));
+        const profileSnap = await getDoc(doc(db, "users", otherUid));
 
-        if (userSnap.exists()) {
-          other = userSnap.data();
-        }
+        if (!profileSnap.exists()) return null;
+
+        const profile = profileSnap.data();
+
+        return {
+          id: item.id,
+          type: "private",
+          uid: otherUid,
+          name: profile.name || "Pengguna",
+          username: profile.username || "",
+          photoURL: profile.photoURL || "",
+          lastMessage: data.lastMessage || "",
+          updatedAt: data.updatedAt
+        };
       } catch (error) {
-        console.warn("Profile lookup:", error);
+        console.warn("Chat profile:", error);
+        return null;
       }
+    }));
 
-      items.push({
-        id: item.id,
-        data,
-        user: other || { name: "Pengguna" }
-      });
+    chats.sort((a, b) =>
+      getTimestamp(b?.updatedAt) - getTimestamp(a?.updatedAt)
+    );
+
+    const container = $("chatList");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const validChats = chats.filter(Boolean);
+
+    if (!validChats.length) {
+      container.innerHTML = `
+        <div class="empty-state">
+          Belum ada percakapan.
+        </div>
+      `;
+      return;
     }
 
-    list.innerHTML = "";
-
-    items.sort((a, b) => {
-      const at = a.data.updatedAt?.toMillis?.() || 0;
-      const bt = b.data.updatedAt?.toMillis?.() || 0;
-      return bt - at;
-    });
-
-    items.forEach(item => {
-      const user = item.user;
-
+    validChats.forEach(chat => {
       const button = document.createElement("button");
-      button.className = "list-item";
-      button.type = "button";
+      button.className = "chat-item";
 
       button.innerHTML = `
-        ${avatarHTML(user.name, user.photoURL)}
-        <div class="list-item-info">
-          <strong>${escapeHTML(user.name)}</strong>
-          <small>${escapeHTML(item.data.lastMessage || "Mulai percakapan")}</small>
+        ${avatarHTML(chat.name, chat.photoURL)}
+        <div class="chat-item-details">
+          <strong>${escapeHTML(chat.name)}</strong>
+          <span>${escapeHTML(chat.lastMessage || "Mulai percakapan")}</span>
         </div>
-        <span class="list-item-time">
-          ${formatTime(item.data.updatedAt)}
-        </span>
       `;
 
       button.addEventListener("click", () => {
-        openConversation(item.id, "private", {
-          ...user,
-          uid: (item.data.members || []).find(
-            uid => uid !== currentUser.uid
-          )
-        });
+        startPrivateChat(chat.uid);
       });
 
-      list.appendChild(button);
+      container.appendChild(button);
     });
-
   }, error => {
-    console.error("Chat listener:", error);
-    toast("Gagal memuat chat: " + error.message);
+    console.error("Listen chats:", error);
+    toast("Gagal memuat daftar chat.");
   });
 
   addListener(unsubscribe);
@@ -1143,42 +1356,87 @@ function listenChats() {
 ================================================== */
 
 function openConversation(id, type, info = {}) {
+  if (!currentUser || !id) return;
+
+  clearConversationListeners();
+
   activeConversation = id;
   activeConversationType = type;
 
   hide($("emptyChat"));
   show($("chatPanel"));
 
-  $("chatName").textContent = info.name || "Percakapan";
-  $("chatAvatar").textContent =
-    (info.name || "U").charAt(0).toUpperCase();
+  if ($("chatName")) {
+    $("chatName").textContent = info.name || "Percakapan";
+  }
 
-  $("chatAvatar").style.backgroundImage = info.photoURL
-    ? `url("${info.photoURL}")`
-    : "none";
+  if ($("chatAvatar")) {
+    $("chatAvatar").textContent =
+      (info.name || "P").charAt(0).toUpperCase();
 
-  $("messages").innerHTML = `
-    <div class="empty-list">Memuat pesan...</div>
-  `;
+    $("chatAvatar").style.backgroundImage = info.photoURL
+      ? `url("${info.photoURL}")`
+      : "none";
+  }
 
-  $("channelControls").innerHTML = "";
-  $("channelComposer").hidden = true;
-  $("composer").hidden = false;
+  if ($("chatPresence")) {
+    $("chatPresence").textContent = "";
+  }
 
-  $("messageInput").disabled = false;
-  $("sendBtn").disabled = false;
+  if ($("messages")) {
+    $("messages").innerHTML = "";
+  }
 
-  $("inviteGroupMember").hidden = type !== "group";
+  if ($("typingIndicator")) {
+    $("typingIndicator").textContent = "";
+  }
+
+  hide($("channelControls"));
+  hide($("channelComposer"));
+
+  const composer = $("composer");
+
+  if (composer) {
+    composer.hidden = type === "channel" && !info.isOwner;
+  }
+
+  if ($("messageInput")) {
+    $("messageInput").disabled = type === "channel" && !info.isOwner;
+    $("messageInput").value = "";
+  }
+
+  if ($("sendBtn")) {
+    $("sendBtn").disabled = type === "channel" && !info.isOwner;
+  }
+
+  if ($("imageInput")) {
+    $("imageInput").disabled = type === "channel" && !info.isOwner;
+  }
 
   if (type === "channel") {
-    $("composer").hidden = true;
-    $("channelComposer").hidden = !info.isOwner;
+    show($("channelControls"));
 
-    $("channelControls").innerHTML = `
-      <div class="channel-member-info">
-        ${Number(info.followers || 0)} PENGIKUT
-      </div>
-    `;
+    if (info.isOwner) {
+      show($("channelComposer"));
+      if (composer) composer.hidden = true;
+    }
+
+    if ($("channelFollowerCount")) {
+      $("channelFollowerCount").textContent =
+        `${Number(info.followerCount || 0)} PENGIKUT`;
+    }
+
+    if ($("channelName")) {
+      $("channelName").textContent = info.name || "Saluran";
+    }
+  }
+
+  if (type === "group") {
+    const isOwner = info.ownerId === currentUser.uid;
+
+    if ($("inviteGroupMember")) {
+      $("inviteGroupMember").hidden = !isOwner;
+    }
   }
 
   listenMessages(id, type);
@@ -1189,24 +1447,30 @@ function openConversation(id, type, info = {}) {
 
   if (type === "private" && info.uid) {
     listenChatPresence(info.uid);
-  } else {
-    $("chatPresence").textContent = "";
   }
 
-  if (window.innerWidth <= 800) {
-    document.querySelector(".content-area").classList.add("mobile-hidden");
+  if (window.innerWidth <= 760) {
+    $("chatPanel")?.classList.add("mobile-active");
+    $("contentArea")?.classList.add("mobile-chat-open");
   }
 }
 
-on("backToChats", "click", () => {
-  hide($("chatPanel"));
-  show($("emptyChat"));
 
-  document.querySelector(".content-area")
-    ?.classList.remove("mobile-hidden");
+/* ==================================================
+   BACK TO CHAT LIST ON MOBILE
+================================================== */
+
+on("backToChats", "click", () => {
+  clearConversationListeners();
 
   activeConversation = null;
   activeConversationType = null;
+
+  hide($("chatPanel"));
+  show($("emptyChat"));
+
+  $("chatPanel")?.classList.remove("mobile-active");
+  $("contentArea")?.classList.remove("mobile-chat-open");
 });
 
 
@@ -1226,73 +1490,33 @@ function messageCollection(id, type) {
   return collection(db, "chats", id, "messages");
 }
 
-function listenMessages(id, type) {
-  const messagesRef = messageCollection(id, type);
 
-  const q = query(
-    messagesRef,
+/* ==================================================
+   LISTEN MESSAGES
+================================================== */
+
+function listenMessages(id, type) {
+  const messagesQuery = query(
+    messageCollection(id, type),
     orderBy("createdAt", "asc"),
     limit(MESSAGE_LIMIT)
   );
 
-  const unsubscribe = onSnapshot(q, snapshot => {
-    if (activeConversation !== id) return;
+  const unsubscribe = onSnapshot(messagesQuery, snapshot => {
+    if (
+      activeConversation !== id ||
+      activeConversationType !== type
+    ) return;
 
     const container = $("messages");
+    if (!container) return;
+
     container.innerHTML = "";
 
-    if (snapshot.empty) {
-      container.innerHTML = `
-        <div class="empty-list">
-          Belum ada pesan. Mulai percakapan!
-        </div>
-      `;
-      return;
-    }
+    snapshot.docs.forEach(item => {
+      const message = item.data();
 
-    snapshot.forEach(item => {
-      const data = item.data();
-      const own = data.senderId === currentUser.uid;
-
-      const message = document.createElement("article");
-      message.className = own
-        ? "message own-message"
-        : "message";
-
-      const text = escapeHTML(data.text || "");
-
-      const image = data.imageURL
-        ? `<img class="message-image" src="${escapeHTML(data.imageURL)}" alt="Gambar pesan">`
-        : "";
-
-      const reactions = renderReactions(data.reactions || {});
-
-      message.innerHTML = `
-        <div class="message-content">
-          ${!own && type !== "private"
-            ? `<small>${escapeHTML(data.senderName || "Pengguna")}</small>`
-            : ""}
-          ${text ? `<p>${text}</p>` : ""}
-          ${image}
-          <div class="message-meta">
-            <time>${formatTime(data.createdAt)}</time>
-          </div>
-          ${reactions}
-          <button
-            class="reaction-button"
-            data-reaction-id="${item.id}"
-            type="button"
-          >+ Reaksi</button>
-        </div>
-      `;
-
-      const reactionButton = message.querySelector(".reaction-button");
-
-      reactionButton?.addEventListener("click", () => {
-        reactToMessage(id, type, item.id);
-      });
-
-      container.appendChild(message);
+      renderMessage(item.id, message, type);
     });
 
     container.scrollTop = container.scrollHeight;
@@ -1302,11 +1526,94 @@ function listenMessages(id, type) {
     }
 
   }, error => {
-    console.error("Message listener:", error);
-    toast("Gagal memuat pesan: " + error.message);
+    console.error("Listen messages:", error);
+    toast("Gagal memuat pesan. Periksa Firestore Rules.");
   });
 
-  addListener(unsubscribe);
+  addConversationListener(unsubscribe);
+}
+
+
+/* ==================================================
+   RENDER MESSAGE
+================================================== */
+
+function renderMessage(messageId, message, type) {
+  const container = $("messages");
+  if (!container) return;
+
+  const own = message.senderId === currentUser?.uid;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = own ? "message own" : "message";
+
+  const image = message.imageURL
+    ? `<img class="message-image"
+             src="${escapeHTML(message.imageURL)}"
+             alt="Gambar pesan"
+             loading="lazy">`
+    : "";
+
+  const text = message.text
+    ? `<div class="message-text">${escapeHTML(message.text)}</div>`
+    : "";
+
+  const sender = type === "group" && !own
+    ? `<div class="message-sender">${escapeHTML(message.senderName || "Pengguna")}</div>`
+    : "";
+
+  wrapper.innerHTML = `
+    <div class="message-bubble">
+      ${sender}
+      ${image}
+      ${text}
+      <div class="message-footer">
+        <span>${formatTime(message.createdAt)}</span>
+        ${own ? `<span class="message-tick">✓</span>` : ""}
+      </div>
+      <div class="message-reactions">
+        ${renderReactions(message.reactions)}
+      </div>
+      <button class="reaction-button" type="button">
+        + Reaksi
+      </button>
+    </div>
+  `;
+
+  wrapper.querySelector(".reaction-button")
+    ?.addEventListener("click", () => {
+      reactToMessage(messageId, type);
+    });
+
+  container.appendChild(wrapper);
+}
+
+
+/* ==================================================
+   MARK MESSAGES READ
+================================================== */
+
+async function markMessagesRead(id, type, documents) {
+  if (!currentUser) return;
+
+  const unread = documents.filter(item => {
+    const data = item.data();
+
+    return (
+      data.senderId !== currentUser.uid &&
+      !(data.readBy || []).includes(currentUser.uid)
+    );
+  });
+
+  for (const item of unread) {
+    try {
+      await updateDoc(item.ref, {
+        readBy: arrayUnion(currentUser.uid)
+      });
+    } catch (error) {
+      console.warn("Mark read:", error);
+    }
+  }
 }
 
 
@@ -1314,213 +1621,157 @@ function listenMessages(id, type) {
    SEND MESSAGE
 ================================================== */
 
-async function sendMessage() {
-  if (!activeConversation || !currentUser || busy) return;
+async function sendMessage(text = "", imageURL = "") {
+  if (!currentUser || !activeConversation) return;
 
-  const text = $("messageInput").value.trim();
+  const cleanText = String(text || "").trim();
 
-  if (!text) return;
+  if (!cleanText && !imageURL) return;
 
   if (activeConversationType === "channel") {
-    toast("Gunakan fitur postingan saluran.");
+    toast("Gunakan fitur kirim postingan saluran.");
     return;
   }
 
-  busy = true;
-  $("sendBtn").disabled = true;
-
   try {
-    const chatId = activeConversation;
-    const type = activeConversationType;
-
-    const collectionRef = messageCollection(chatId, type);
-
-    await addDoc(collectionRef, {
-      senderId: currentUser.uid,
-      senderName: currentProfile.name,
-      text,
-      imageURL: "",
-      reactions: {},
-      readBy: [currentUser.uid],
-      createdAt: serverTimestamp()
-    });
-
-    const parent = doc(
+    const parentRef = doc(
       db,
-      type === "group" ? "groups" : "chats",
-      chatId
+      activeConversationType === "group" ? "groups" : "chats",
+      activeConversation
     );
 
-    await updateDoc(parent, {
-      lastMessage: text.slice(0, 100),
-      updatedAt: serverTimestamp()
-    });
+    const messagesRef = messageCollection(
+      activeConversation,
+      activeConversationType
+    );
 
-    $("messageInput").value = "";
-
-    stopTyping(chatId);
-
-  } catch (error) {
-    console.error("Send message:", error);
-    toast("Pesan gagal dikirim: " + error.message);
-
-  } finally {
-    busy = false;
-    $("sendBtn").disabled = false;
-  }
-}
-
-on("sendBtn", "click", sendMessage);
-
-on("messageInput", "keydown", event => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    sendMessage();
-  }
-});
-
-
-/* ==================================================
-   SEND IMAGE MESSAGE
-================================================== */
-
-on("imageInput", "change", async event => {
-  const file = event.target.files?.[0];
-
-  if (!file || !activeConversation) return;
-
-  if (activeConversationType === "channel") {
-    toast("Gunakan unggahan saluran.");
-    event.target.value = "";
-    return;
-  }
-
-  try {
-    busy = true;
-
-    const imageURL = await uploadImage(file, "messages");
-
-    const type = activeConversationType;
-    const id = activeConversation;
-
-    await addDoc(messageCollection(id, type), {
+    await addDoc(messagesRef, {
       senderId: currentUser.uid,
-      senderName: currentProfile.name,
-      text: "",
+      senderName: currentProfile?.name || "Pengguna",
+      text: cleanText,
       imageURL,
       reactions: {},
       readBy: [currentUser.uid],
       createdAt: serverTimestamp()
     });
 
-    await updateDoc(
-      doc(db, type === "group" ? "groups" : "chats", id),
-      {
-        lastMessage: "Mengirim gambar",
-        updatedAt: serverTimestamp()
-      }
-    );
+    await updateDoc(parentRef, {
+      lastMessage: cleanText || "Foto",
+      updatedAt: serverTimestamp()
+    });
 
-    toast("Gambar berhasil dikirim.");
+    if ($("messageInput")) {
+      $("messageInput").value = "";
+    }
+
+    stopTyping(activeConversation, activeConversationType);
 
   } catch (error) {
-    console.error(error);
-    toast("Gagal mengirim gambar: " + error.message);
+    console.error("Send message:", error);
+    toast("Pesan gagal dikirim: " + error.message);
+  }
+}
+
+on("sendBtn", "click", () => {
+  sendMessage($("messageInput")?.value || "");
+});
+
+on("messageInput", "keydown", event => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    sendMessage($("messageInput")?.value || "");
+  }
+});
+
+
+/* ==================================================
+   SEND MESSAGE IMAGE
+================================================== */
+
+on("imageInput", "change", async event => {
+  const file = event.target.files?.[0];
+
+  if (!file || !currentUser || !activeConversation) return;
+
+  try {
+    const imageURL = await uploadImage(file, "messages");
+
+    if (activeConversationType === "channel") {
+      await sendChannelPost("", imageURL);
+    } else {
+      await sendMessage("", imageURL);
+    }
+
+    toast("Foto berhasil dikirim.");
+
+  } catch (error) {
+    console.error("Message image:", error);
+    toast("Gagal mengirim foto: " + error.message);
 
   } finally {
-    busy = false;
     event.target.value = "";
   }
 });
 
 
 /* ==================================================
-   READ RECEIPTS
+   REACTIONS
 ================================================== */
 
-async function markMessagesRead(id, type, messages) {
-  const unread = messages.filter(message => {
-    const data = message.data();
-
-    return data.senderId !== currentUser.uid &&
-      !(data.readBy || []).includes(currentUser.uid);
-  });
-
-  for (const message of unread) {
-    try {
-      await updateDoc(
-        doc(messageCollection(id, type), message.id),
-        {
-          readBy: arrayUnion(currentUser.uid)
-        }
-      );
-    } catch (error) {
-      console.warn("Read receipt:", error);
-    }
-  }
+function renderReactions(reactions = {}) {
+  return Object.entries(reactions || {})
+    .filter(([, users]) => Array.isArray(users) && users.length)
+    .map(([emoji, users]) => `
+      <span class="reaction-item">
+        ${escapeHTML(emoji)} ${users.length}
+      </span>
+    `)
+    .join("");
 }
 
+async function reactToMessage(messageId, type) {
+  if (!currentUser || !activeConversation) return;
 
-/* ==================================================
-   MESSAGE REACTIONS
-================================================== */
+  const emoji = prompt("Masukkan reaksi: ❤️ 😂 👍 😮 😢 🔥");
 
-function renderReactions(reactions) {
-  const entries = Object.entries(reactions || {});
-
-  if (!entries.length) return "";
-
-  return `
-    <div class="reaction-list">
-      ${entries.map(([emoji, users]) => `
-        <span class="reaction-chip">
-          ${escapeHTML(emoji)} ${Array.isArray(users) ? users.length : 0}
-        </span>
-      `).join("")}
-    </div>
-  `;
-}
-
-async function reactToMessage(parentId, type, messageId) {
-  const choices = ["👍", "❤️", "😂", "😮", "👏"];
-
-  const selected = prompt(
-    "Pilih reaksi:\n1. 👍\n2. ❤️\n3. 😂\n4. 😮\n5. 👏"
-  );
-
-  const index = Number(selected) - 1;
-
-  if (!Number.isInteger(index) || index < 0 || index >= choices.length) {
-    return;
-  }
-
-  const emoji = choices[index];
+  if (!emoji || emoji.length > 8) return;
 
   try {
-    const messageRef = doc(
-      messageCollection(parentId, type),
-      messageId
+    const collectionRef = messageCollection(
+      activeConversation,
+      type
     );
+
+    const messageRef = doc(collectionRef, messageId);
 
     await runTransaction(db, async transaction => {
       const snapshot = await transaction.get(messageRef);
 
-      if (!snapshot.exists()) return;
+      if (!snapshot.exists()) {
+        throw new Error("Pesan tidak ditemukan.");
+      }
 
       const data = snapshot.data();
-      const reactions = data.reactions || {};
-      const users = reactions[emoji] || [];
+      const reactions = { ...(data.reactions || {}) };
 
-      reactions[emoji] = users.includes(currentUser.uid)
-        ? users.filter(uid => uid !== currentUser.uid)
-        : [...users, currentUser.uid];
+      const users = Array.isArray(reactions[emoji])
+        ? [...reactions[emoji]]
+        : [];
 
-      transaction.update(messageRef, {
-        reactions
-      });
+      if (users.includes(currentUser.uid)) {
+        reactions[emoji] = users.filter(
+          uid => uid !== currentUser.uid
+        );
+      } else {
+        users.push(currentUser.uid);
+        reactions[emoji] = users;
+      }
+
+      transaction.update(messageRef, { reactions });
     });
 
   } catch (error) {
+    console.error("Reaction:", error);
     toast("Gagal memberikan reaksi: " + error.message);
   }
 }
@@ -1535,180 +1786,67 @@ function typingPath(id, type, uid) {
 }
 
 async function updateTyping(id, type) {
-  if (!currentUser) return;
+  if (!currentUser || !id) return;
 
   try {
-    const path = dbRef(
-      rtdb,
-      typingPath(id, type, currentUser.uid)
-    );
-
-    await set(path, {
-      name: currentProfile.name,
+    await set(dbRef(rtdb, typingPath(id, type, currentUser.uid)), {
+      name: currentProfile?.name || "Pengguna",
       typing: true,
       updatedAt: rtdbTimestamp()
     });
-
-    clearTimeout(typingTimer);
-
-    typingTimer = setTimeout(() => {
-      stopTyping(id, type);
-    }, 2500);
-
   } catch (error) {
-    console.warn("Typing:", error);
+    console.warn("Update typing:", error);
+  }
+
+  clearTimeout(typingTimer);
+
+  typingTimer = setTimeout(() => {
+    stopTyping(id, type);
+  }, 2500);
+}
+
+async function stopTyping(id, type) {
+  if (!currentUser || !id || !type) return;
+
+  clearTimeout(typingTimer);
+  typingTimer = null;
+
+  try {
+    await remove(dbRef(rtdb, typingPath(id, type, currentUser.uid)));
+  } catch (error) {
+    console.warn("Stop typing:", error);
   }
 }
 
-async function stopTyping(id, type = activeConversationType) {
-  if (!currentUser || !id || !type) return;
-
-  try {
-    await remove(
-      dbRef(rtdb, typingPath(id, type, currentUser.uid))
-    );
-  } catch {}
-}
-
 function listenTyping(id, type) {
-  const path = dbRef(rtdb, `typing/${type}/${id}`);
+  const typingRef = dbRef(rtdb, `typing/${type}/${id}`);
 
-  const unsubscribe = onValue(path, snapshot => {
-    const values = snapshot.val() || {};
+  const unsubscribe = onValue(typingRef, snapshot => {
+    if (
+      activeConversation !== id ||
+      activeConversationType !== type
+    ) return;
 
-    const other = Object.entries(values).find(([uid, data]) =>
-      uid !== currentUser.uid && data?.typing
-    );
+    const users = snapshot.val() || {};
 
-    $("typingIndicator").textContent = other
-      ? `${other[1].name || "Pengguna"} sedang mengetik...`
-      : "";
+    const typingUsers = Object.entries(users)
+      .filter(([uid, data]) =>
+        uid !== currentUser?.uid && data?.typing
+      )
+      .map(([, data]) => data.name || "Pengguna");
+
+    if ($("typingIndicator")) {
+      $("typingIndicator").textContent = typingUsers.length
+        ? `${typingUsers.join(", ")} sedang mengetik...`
+        : "";
+    }
   });
 
-  addListener(unsubscribe);
+  addConversationListener(() => {
+    unsubscribe();
+  });
 }
 
 on("messageInput", "input", () => {
   if (
-    activeConversation &&
-    ["private", "group"].includes(activeConversationType)
-  ) {
-    updateTyping(activeConversation, activeConversationType);
-  }
-});
-
-
-/* ==================================================
-   GROUPS
-================================================== */
-
-function listenGroups() {
-  if (!currentUser) return;
-
-  const q = query(
-    collection(db, "groups"),
-    where("members", "array-contains", currentUser.uid)
-  );
-
-  const unsubscribe = onSnapshot(q, snapshot => {
-    const container = $("groupList");
-    container.innerHTML = "";
-
-    if (snapshot.empty) {
-      container.innerHTML = `
-        <div class="empty-list">
-          Kamu belum bergabung dengan grup.
-        </div>
-      `;
-      return;
-    }
-
-    snapshot.forEach(item => {
-      const data = item.data();
-
-      const button = document.createElement("button");
-      button.className = "list-item";
-      button.type = "button";
-
-      button.innerHTML = `
-        <div class="avatar">
-          ${escapeHTML((data.name || "G").charAt(0).toUpperCase())}
-        </div>
-        <div class="list-item-info">
-          <strong>${escapeHTML(data.name || "Grup")}</strong>
-          <small>${(data.members || []).length} anggota</small>
-        </div>
-      `;
-
-      button.addEventListener("click", () => {
-        openConversation(item.id, "group", {
-          name: data.name
-        });
-      });
-
-      container.appendChild(button);
-    });
-
-  }, error => {
-    console.error("Group listener:", error);
-    toast("Gagal memuat grup: " + error.message);
-  });
-
-  addListener(unsubscribe);
-}
-
-
-/* ==================================================
-   CREATE GROUP
-================================================== */
-
-on("createGroupBtn", "click", async () => {
-  const name = prompt("Masukkan nama grup:");
-
-  if (!name?.trim()) return;
-
-  try {
-    const groupRef = await addDoc(collection(db, "groups"), {
-      name: name.trim(),
-      ownerId: currentUser.uid,
-      members: [currentUser.uid],
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      lastMessage: ""
-    });
-
-    toast("Grup berhasil dibuat.");
-
-    openConversation(groupRef.id, "group", {
-      name: name.trim()
-    });
-
-  } catch (error) {
-    console.error(error);
-    toast("Gagal membuat grup: " + error.message);
-  }
-});
-
-
-/* ==================================================
-   INVITE GROUP MEMBER
-================================================== */
-
-on("inviteGroupMember", "click", async () => {
-  if (activeConversationType !== "group") return;
-
-  const username = prompt("Masukkan username anggota:");
-
-  if (!username?.trim()) return;
-
-  try {
-    const usernameRef = doc(
-      db,
-      "usernames",
-      username.trim().toLowerCase()
-    );
-
-    const usernameSnap = await getDoc(usernameRef);
-
-    if (!usernameSnap.exists()) {
-      toast("Username tidak ditemukan.")
+    ac
