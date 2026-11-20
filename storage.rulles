@@ -1,21 +1,68 @@
-
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
 
-    function active() {
-      return request.auth != null &&
-        firestore.get(
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function activeUser() {
+      return signedIn()
+        && firestore.exists(
+          /databases/(default)/documents/users/$(request.auth.uid)
+        )
+        && firestore.get(
           /databases/(default)/documents/users/$(request.auth.uid)
         ).data.status == "active";
     }
 
-    match /chat-media/{uid}/{fileName} {
-      allow read: if active();
-      allow write: if active()
+    function validImage() {
+      return request.resource != null
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches("image/.*");
+    }
+
+    // PROFILE PHOTOS
+    match /profiles/{uid}/{fileName} {
+      allow read: if activeUser();
+
+      allow create, update: if activeUser()
         && request.auth.uid == uid
-        && request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+        && validImage();
+
+      allow delete: if activeUser()
+        && request.auth.uid == uid;
+    }
+
+    // CHAT IMAGES
+    match /messages/{uid}/{fileName} {
+      allow read: if activeUser();
+
+      allow create, update: if activeUser()
+        && request.auth.uid == uid
+        && validImage();
+
+      allow delete: if activeUser()
+        && request.auth.uid == uid;
+    }
+
+    // CHANNEL IMAGES
+    match /channel-posts/{uid}/{fileName} {
+      allow read: if activeUser();
+
+      allow create, update: if activeUser()
+        && request.auth.uid == uid
+        && validImage();
+
+      allow delete: if activeUser()
+        && request.auth.uid == uid;
+    }
+
+    // DENY EVERYTHING ELSE
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }
