@@ -5,169 +5,441 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10131d">
-  <title>ZORAAPP</title>
+  <meta name="description" content="ZORAAPP — Connect your world">
+  <title>ZORAAPP — Social Messenger</title>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body class="theme-dark">
 
-<!-- AUTH -->
+<!-- ==================================================
+     AUTHENTICATION
+================================================== -->
+
 <section id="authScreen" class="auth-screen">
   <div class="auth-card">
+
     <div class="logo">Z</div>
-    <div class="eyebrow">YOUR PRIVATE SPACE</div>
+    <div class="eyebrow">©2026 ZORAAPP ALLRIGHT RESERVED</div>
     <h1>ZORAAPP</h1>
     <p class="muted">Pesan, terhubung, dan berbagi.</p>
 
+    <!-- LOGIN -->
     <section id="loginMode">
+
       <h2>Selamat datang kembali</h2>
       <p class="form-description">Masuk untuk melanjutkan percakapan.</p>
-      <div id="authError" class="error"></div>
 
-      <label class="field-label" for="authEmail">EMAIL</label>
-      <input id="authEmail" type="email" placeholder="Alamat email" autocomplete="email">
+      <div id="authError" class="error" role="alert"></div>
 
-      <label class="field-label" for="authPassword">PASSWORD</label>
-      <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password">
+      <div class="auth-tabs">
+        <button id="emailLoginTab" class="auth-tab active" type="button">
+          Email
+        </button>
 
-      <button id="forgotPassword" class="text-button forgot-btn" type="button">Lupa password?</button>
-      <button id="loginBtn" class="primary-btn" type="button">MASUK KE AKUN</button>
+        <button id="phoneLoginTab" class="auth-tab" type="button">
+          Nomor HP
+        </button>
+      </div>
 
-      <p class="auth-switch">Belum punya akun?
-        <button id="showRegister" class="text-button" type="button">Daftar sekarang</button>
+      <!-- EMAIL LOGIN -->
+      <div id="emailLoginPanel">
+
+        <label class="field-label" for="authEmail">EMAIL</label>
+        <input
+          id="authEmail"
+          type="email"
+          placeholder="Alamat email"
+          autocomplete="email"
+        >
+
+        <label class="field-label" for="authPassword">PASSWORD</label>
+        <input
+          id="authPassword"
+          type="password"
+          placeholder="Password"
+          autocomplete="current-password"
+        >
+
+        <button id="forgotPassword" class="text-button forgot-btn" type="button">
+          Lupa password?
+        </button>
+
+        <button id="loginBtn" class="primary-btn" type="button">
+          MASUK KE AKUN
+        </button>
+
+      </div>
+
+      <!-- PHONE LOGIN -->
+      <div id="phoneLoginPanel" hidden>
+
+        <label class="field-label" for="phoneNumber">NOMOR HP</label>
+
+        <input
+          id="phoneNumber"
+          type="tel"
+          placeholder="+6281234567890"
+          autocomplete="tel"
+        >
+
+        <p class="input-hint">
+          Gunakan kode negara. Contoh: +6281234567890
+        </p>
+
+        <button id="sendPhoneOtp" class="primary-btn" type="button">
+          KIRIM KODE SMS
+        </button>
+
+        <div id="otpPanel" hidden>
+
+          <label class="field-label" for="phoneOtp">KODE VERIFIKASI</label>
+
+          <input
+            id="phoneOtp"
+            type="text"
+            inputmode="numeric"
+            maxlength="6"
+            placeholder="Masukkan 6 digit OTP"
+            autocomplete="one-time-code"
+          >
+
+          <button id="verifyPhoneOtp" class="primary-btn" type="button">
+            VERIFIKASI & MASUK
+          </button>
+
+          <button id="resendPhoneOtp" class="text-button" type="button">
+            Kirim ulang kode
+          </button>
+
+        </div>
+
+        <div id="recaptcha-container"></div>
+
+      </div>
+
+      <p class="auth-switch">
+        Belum punya akun?
+        <button id="showRegister" class="text-button" type="button">
+          Daftar sekarang
+        </button>
       </p>
+
     </section>
 
+    <!-- REGISTER -->
     <section id="registerMode" hidden>
+
       <h2>Buat akun baru</h2>
       <p class="form-description">Bergabung dan mulai terhubung.</p>
-      <div id="registerError" class="error"></div>
+
+      <div id="registerError" class="error" role="alert"></div>
 
       <label class="field-label" for="authName">NAMA</label>
-      <input id="authName" type="text" maxlength="40" placeholder="Nama pengguna">
+      <input
+        id="authName"
+        type="text"
+        maxlength="40"
+        placeholder="Nama pengguna"
+        autocomplete="name"
+      >
 
       <label class="field-label" for="registerUsername">USERNAME</label>
-      <input id="registerUsername" type="text" maxlength="20" placeholder="contoh: zora123" autocomplete="username">
-      <p class="input-hint">Username digunakan orang lain untuk menemukan akunmu.</p>
+      <input
+        id="registerUsername"
+        type="text"
+        maxlength="20"
+        placeholder="contoh: zora123"
+        autocomplete="username"
+      >
+
+      <p class="input-hint">
+        Username digunakan orang lain untuk menemukan akunmu.
+      </p>
 
       <label class="field-label" for="registerEmail">EMAIL</label>
-      <input id="registerEmail" type="email" placeholder="Alamat email" autocomplete="email">
+      <input
+        id="registerEmail"
+        type="email"
+        placeholder="Alamat email"
+        autocomplete="email"
+      >
 
       <label class="field-label" for="registerPassword">PASSWORD</label>
-      <input id="registerPassword" type="password" placeholder="Minimal 8 karakter" autocomplete="new-password">
+      <input
+        id="registerPassword"
+        type="password"
+        placeholder="Minimal 8 karakter"
+        autocomplete="new-password"
+      >
 
-      <button id="registerBtn" class="primary-btn" type="button">BUAT AKUN</button>
+      <button id="registerBtn" class="primary-btn" type="button">
+        BUAT AKUN
+      </button>
 
-      <p class="auth-switch">Sudah punya akun?
-        <button id="showLogin" class="text-button" type="button">Masuk</button>
+      <p class="auth-switch">
+        Sudah punya akun?
+        <button id="showLogin" class="text-button" type="button">
+          Masuk
+        </button>
       </p>
+
     </section>
+
   </div>
-  <div class="auth-footer">ZORAAPP <span>•</span> CONNECT YOUR WORLD</div>
+
+  <div class="auth-footer">
+    ZORAAPP <span>•</span> CONNECT YOUR WORLD
+  </div>
 </section>
 
-<!-- ACCOUNT HELD -->
+
+<!-- ==================================================
+     PROFILE SETUP FOR PHONE USERS
+================================================== -->
+
+<div id="phoneProfileModal" class="modal" hidden>
+  <div class="modal-card">
+
+    <div class="eyebrow">WELCOME TO ZORAAPP</div>
+    <h2>Lengkapi profil</h2>
+
+    <p class="form-description">
+      Buat identitas akun sebelum mulai menggunakan ZORAAPP.
+    </p>
+
+    <div id="phoneProfileError" class="error"></div>
+
+    <label class="field-label" for="phoneProfileName">NAMA</label>
+    <input
+      id="phoneProfileName"
+      type="text"
+      maxlength="40"
+      placeholder="Nama kamu"
+    >
+
+    <label class="field-label" for="phoneProfileUsername">USERNAME</label>
+    <input
+      id="phoneProfileUsername"
+      type="text"
+      maxlength="20"
+      placeholder="contoh: zora123"
+    >
+
+    <button id="completePhoneProfile" class="primary-btn" type="button">
+      SELESAIKAN PROFIL
+    </button>
+
+  </div>
+</div>
+
+
+<!-- ==================================================
+     ACCOUNT STATUS
+================================================== -->
+
 <section id="holdScreen" class="special-screen hold-screen" hidden>
   <div class="special-card">
+
     <div class="status-symbol warning-symbol">!</div>
+
     <div class="eyebrow">ACCOUNT SECURITY</div>
-    <h2>AKUN ANDA TERDETEKSI PERILAKU ABNORMAL !</h2>
-    <p>Akun Anda sedang dibatasi sementara karena terdeteksi aktivitas yang tidak biasa.</p>
+
+    <h2>AKUN DIBATASI SEMENTARA</h2>
+
+    <p>
+      Akun sedang dibatasi sementara karena aktivitas yang perlu ditinjau.
+    </p>
 
     <div class="notice-box">
       <strong>AJUKAN BANDING</strong>
-      <span>Jelaskan alasan mengapa akun Anda perlu ditinjau kembali.</span>
+      <span>Jelaskan alasan permohonan peninjauan akun.</span>
     </div>
 
     <label class="field-label" for="appealText">ALASAN BANDING</label>
-    <textarea id="appealText" placeholder="Tuliskan alasan banding..."></textarea>
-    <button id="appealBtn" class="primary-btn" type="button">KIRIM BANDING</button>
+
+    <textarea
+      id="appealText"
+      placeholder="Tuliskan alasan banding..."
+    ></textarea>
+
+    <button id="appealBtn" class="primary-btn" type="button">
+      KIRIM BANDING
+    </button>
+
     <p id="appealMessage" class="feedback-message"></p>
-    <button id="logoutHold" class="secondary-btn" type="button">KELUAR AKUN</button>
+
+    <button id="logoutHold" class="secondary-btn" type="button">
+      KELUAR AKUN
+    </button>
+
   </div>
 </section>
 
-<!-- ACCOUNT RECOVERED -->
+
 <section id="recoveredScreen" class="special-screen recovered-screen" hidden>
   <div class="special-card">
+
     <div class="status-symbol success-symbol">✓</div>
+
     <div class="eyebrow">ACCOUNT RECOVERY</div>
-    <h2>AKUN ANDA TELAH DIPULIHKAN</h2>
-    <p>Akun Anda telah berhasil dipulihkan. Lanjutkan dengan verifikasi untuk mengaktifkan kembali akses akun.</p>
 
-    <div class="notice-box success-notice">
-      <strong>PEMULIHAN BERHASIL</strong>
-      <span>Status akun telah diperbarui. Silakan lanjutkan verifikasi.</span>
-    </div>
+    <h2>AKUN TELAH DIPULIHKAN</h2>
 
-    <button id="verifyAccountBtn" class="primary-btn" type="button">VERIFIKASI</button>
-    <button id="logoutRecovered" class="secondary-btn" type="button">KELUAR AKUN</button>
+    <p>
+      Status akun telah diperbarui. Silakan masuk kembali.
+    </p>
+
+    <button id="verifyAccountBtn" class="primary-btn" type="button">
+      LANJUTKAN
+    </button>
+
+    <button id="logoutRecovered" class="secondary-btn" type="button">
+      KELUAR AKUN
+    </button>
+
   </div>
 </section>
 
-<!-- PERMANENT -->
+
 <section id="permanentScreen" class="special-screen permanent-screen" hidden>
   <div class="special-card">
+
     <div class="status-symbol danger-symbol">×</div>
+
     <div class="eyebrow">ACCOUNT STATUS</div>
+
     <h2>AKUN DINONAKTIFKAN</h2>
-    <p>Akun ini telah dinonaktifkan dan tidak dapat digunakan untuk sementara waktu.</p>
+
+    <p>
+      Akun ini dinonaktifkan dan tidak dapat digunakan.
+    </p>
+
     <div class="notice-box danger-notice">
       <strong>AKSES DIBATASI</strong>
-      <span>Hubungi administrator jika Anda merasa keputusan ini tidak tepat.</span>
+      <span>Hubungi administrator jika merasa keputusan ini keliru.</span>
     </div>
-    <button id="newAccountBtn" class="primary-btn" type="button">KELUAR</button>
+
+    <button id="newAccountBtn" class="primary-btn" type="button">
+      KELUAR
+    </button>
+
   </div>
 </section>
 
-<!-- MAIN APP -->
+
+<!-- ==================================================
+     MAIN APPLICATION
+================================================== -->
+
 <div id="appScreen" class="app" hidden>
+
+  <!-- HEADER -->
   <header class="app-header">
+
     <div class="brand">
       <span class="brand-mark">Z</span>
       <span>ZORAAPP</span>
       <span class="brand-version">SOCIAL</span>
     </div>
+
     <div class="header-actions">
-      <button id="themeBtn" class="icon-action" title="Ganti tema">◐</button>
-      <button id="profileBtn" class="header-profile">Profil</button>
-      <button id="logoutBtn" class="header-logout">Keluar</button>
+
+      <button id="themeBtn" class="icon-action" type="button" title="Ganti tema">
+        ◐
+      </button>
+
+      <button id="profileBtn" class="header-profile" type="button">
+        Profil
+      </button>
+
+      <button id="logoutBtn" class="header-logout" type="button">
+        Keluar
+      </button>
+
     </div>
+
   </header>
 
+
   <main class="main-layout">
+
+    <!-- SIDEBAR -->
     <nav class="side-nav">
+
       <div class="nav-caption">MENU UTAMA</div>
-      <button class="nav-button active" data-page="chatsPage">Chat</button>
-      <button class="nav-button" data-page="updatesPage">Update</button>
-      <button class="nav-button" data-page="communitiesPage">Komunitas</button>
-      <button class="nav-button" data-page="channelsPage">Saluran</button>
-      <button class="nav-button" data-page="callsPage">Panggilan</button>
+
+      <button class="nav-button active" data-page="chatsPage" type="button">
+        Chat
+      </button>
+
+      <button class="nav-button" data-page="updatesPage" type="button">
+        Update
+      </button>
+
+      <button class="nav-button" data-page="communitiesPage" type="button">
+        Komunitas
+      </button>
+
+      <button class="nav-button" data-page="channelsPage" type="button">
+        Saluran
+      </button>
+
+      <button class="nav-button" data-page="callsPage" type="button">
+        Panggilan
+      </button>
+
       <div class="nav-divider"></div>
-      <button class="nav-button" data-page="settingsPage">Pengaturan</button>
+
+      <button class="nav-button" data-page="settingsPage" type="button">
+        Pengaturan
+      </button>
+
     </nav>
 
+
+    <!-- PAGE CONTENT -->
     <section class="content-area">
 
-      <!-- CHATS -->
+      <!-- CHAT PAGE -->
       <section id="chatsPage" class="page active">
+
         <div class="page-heading">
+
           <div>
             <div class="eyebrow">MESSAGES</div>
             <h2>Chat</h2>
             <p>Pesan pribadi dan grup</p>
           </div>
-          <button id="newChatBtn" class="round-action" title="Chat baru">+</button>
+
+          <button id="newChatBtn" class="round-action" type="button">
+            +
+          </button>
+
         </div>
-        <input id="searchUser" class="search-input" placeholder="Cari dengan @username...">
+
+        <input
+          id="searchUser"
+          class="search-input"
+          placeholder="Cari dengan @username..."
+          autocomplete="off"
+        >
+
         <div id="searchResults"></div>
+
         <div id="chatList" class="list-container"></div>
+
       </section>
 
-      <!-- UPDATES -->
+
+      <!-- UPDATE PAGE -->
       <section id="updatesPage" class="page" hidden>
+
         <div class="page-heading">
           <div>
             <div class="eyebrow">MOMENTS</div>
@@ -175,45 +447,77 @@
             <p>Status terbaru pengguna</p>
           </div>
         </div>
+
         <div class="panel">
+
           <h3>Status saya</h3>
-          <button id="createStatusBtn" class="primary-btn" type="button">+ BUAT STATUS</button>
+
+          <button id="createStatusBtn" class="primary-btn" type="button">
+            + BUAT STATUS
+          </button>
+
           <div id="myStatuses"></div>
+
         </div>
+
         <div class="panel">
+
           <h3>Pembaruan teman</h3>
+
           <div id="statusList"></div>
+
         </div>
+
       </section>
 
-      <!-- COMMUNITIES -->
+
+      <!-- COMMUNITIES PAGE -->
       <section id="communitiesPage" class="page" hidden>
+
         <div class="page-heading">
+
           <div>
             <div class="eyebrow">COMMUNITY</div>
             <h2>Komunitas</h2>
             <p>Grup percakapan bersama</p>
           </div>
-          <button id="createGroupBtn" class="round-action" type="button">+</button>
+
+          <button id="createGroupBtn" class="round-action" type="button">
+            +
+          </button>
+
         </div>
+
         <div id="groupList" class="list-container"></div>
+
       </section>
 
-      <!-- CHANNELS -->
+
+      <!-- CHANNEL PAGE -->
       <section id="channelsPage" class="page" hidden>
+
         <div class="page-heading">
+
           <div>
             <div class="eyebrow">BROADCAST</div>
             <h2>Saluran</h2>
             <p>Informasi dan pembaruan</p>
           </div>
-          <button id="createChannelBtn" class="round-action" type="button">+</button>
+
+          <button id="createChannelBtn" class="round-action" type="button">
+            +
+          </button>
+
         </div>
+
         <div id="channelList" class="list-container"></div>
+
       </section>
 
-      <!-- CALLS -->
+
+      <!-- CALL PAGE -->
       <section id="callsPage" class="page" hidden>
+
         <div class="page-heading">
           <div>
             <div class="eyebrow">CONNECTION</div>
@@ -221,15 +525,19 @@
             <p>Riwayat panggilan</p>
           </div>
         </div>
+
         <div class="empty-state">
           <div class="empty-logo">Z</div>
           <h2>Panggilan</h2>
           <p>Fitur panggilan belum tersedia.</p>
         </div>
+
       </section>
 
-      <!-- SETTINGS -->
+
+      <!-- SETTINGS PAGE -->
       <section id="settingsPage" class="page" hidden>
+
         <div class="page-heading">
           <div>
             <div class="eyebrow">PREFERENCES</div>
@@ -239,135 +547,429 @@
         </div>
 
         <div class="settings-profile">
+
           <div class="avatar" id="myAvatar">Z</div>
+
           <div class="profile-info">
             <strong id="myName">Pengguna</strong>
             <small id="myEmail"></small>
+            <small id="myPhone"></small>
           </div>
+
         </div>
 
         <div class="settings-section-title">AKUN</div>
-        <button id="editProfileBtn" class="setting-item">Edit profil</button>
+
+        <button id="editProfileBtn" class="setting-item" type="button">
+          Edit profil
+        </button>
+
+        <button id="linkPhoneBtn" class="setting-item" type="button">
+          Hubungkan nomor HP
+        </button>
 
         <div class="settings-section-title">TAMPILAN</div>
-        <button id="settingsThemeBtn" class="setting-item">Ganti tema</button>
+
+        <button id="settingsThemeBtn" class="setting-item" type="button">
+          Ganti tema
+        </button>
 
         <div class="settings-section-title">ADMINISTRASI</div>
-        <button id="openAdmin" class="setting-item" hidden>Panel administrator</button>
+
+        <button id="openAdmin" class="setting-item" type="button" hidden>
+          Panel administrator
+        </button>
 
         <div class="settings-section-title">LAINNYA</div>
-        <button id="settingsLogoutBtn" class="setting-item danger">Keluar akun</button>
+
+        <button id="settingsLogoutBtn" class="setting-item danger" type="button">
+          Keluar akun
+        </button>
+
       </section>
+
     </section>
 
-    <!-- CONVERSATION -->
+
+    <!-- ==================================================
+         CONVERSATION AREA
+    ================================================== -->
+
     <section class="conversation-area">
+
       <div id="emptyChat" class="empty-state">
+
         <div class="empty-logo">Z</div>
+
         <div class="eyebrow">ZORAAPP MESSENGER</div>
+
         <h2>Mulai percakapan</h2>
+
         <p>Pilih pengguna untuk mulai berkirim pesan.</p>
+
       </div>
 
+
       <div id="chatPanel" class="chat-panel" hidden>
+
         <header class="conversation-header">
-          <button id="backToChats" class="back-button">‹</button>
+
+          <button id="backToChats" class="back-button" type="button">
+            ‹
+          </button>
+
           <div class="avatar" id="chatAvatar">U</div>
+
           <div class="conversation-user">
             <strong id="chatName">Pengguna</strong>
-            <small id="chatVerified"></small>
+            <small id="chatPresence"></small>
+            <small id="typingIndicator"></small>
           </div>
+
+          <button id="inviteGroupMember" class="secondary-btn" type="button" hidden>
+            Tambah anggota
+          </button>
+
         </header>
+
+        <div class="chat-security-notice">
+          Privasi percakapan
+        </div>
+
+        <div id="channelControls" class="channel-controls"></div>
 
         <div id="messages" class="messages"></div>
 
         <div class="composer">
+
           <label class="attach-button" title="Kirim gambar">
             +
-            <input id="imageInput" type="file" accept="image/*" hidden>
+            <input
+              id="imageInput"
+              type="file"
+              accept="image/*"
+              hidden
+            >
           </label>
-          <input id="messageInput" placeholder="Ketik pesan..." autocomplete="off">
-          <button id="sendBtn" class="send-button" type="button">Kirim</button>
+
+          <input
+            id="messageInput"
+            placeholder="Ketik pesan..."
+            autocomplete="off"
+          >
+
+          <button id="sendBtn" class="send-button" type="button">
+            Kirim
+          </button>
+
         </div>
+
+        <div id="channelComposer" class="composer channel-composer" hidden>
+
+          <label class="attach-button" title="Pilih gambar">
+            +
+            <input
+              id="channelImageInput"
+              type="file"
+              accept="image/*"
+              hidden
+            >
+          </label>
+
+          <input
+            id="channelPostInput"
+            placeholder="Tulis postingan saluran..."
+          >
+
+          <button id="sendChannelPost" class="send-button" type="button">
+            Posting
+          </button>
+
+        </div>
+
       </div>
+
     </section>
+
   </main>
 
+
+  <!-- MOBILE NAVIGATION -->
   <nav class="mobile-nav">
-    <button class="nav-button active" data-page="chatsPage">Chat</button>
-    <button class="nav-button" data-page="updatesPage">Update</button>
-    <button class="nav-button" data-page="communitiesPage">Grup</button>
-    <button class="nav-button" data-page="channelsPage">Saluran</button>
-    <button class="nav-button" data-page="settingsPage">Setting</button>
+
+    <button class="nav-button active" data-page="chatsPage" type="button">
+      Chat
+    </button>
+
+    <button class="nav-button" data-page="updatesPage" type="button">
+      Update
+    </button>
+
+    <button class="nav-button" data-page="communitiesPage" type="button">
+      Grup
+    </button>
+
+    <button class="nav-button" data-page="channelsPage" type="button">
+      Saluran
+    </button>
+
+    <button class="nav-button" data-page="settingsPage" type="button">
+      Setting
+    </button>
+
   </nav>
+
 </div>
 
-<!-- PROFILE MODAL -->
+
+<!-- ==================================================
+     PROFILE MODAL
+================================================== -->
+
 <div id="profileModal" class="modal" hidden>
+
   <div class="modal-card">
+
     <div class="modal-heading">
+
       <div>
         <div class="eyebrow">YOUR ACCOUNT</div>
         <h2>Edit profil</h2>
       </div>
-      <button id="closeProfile" class="modal-close" type="button">×</button>
+
+      <button id="closeProfile" class="modal-close" type="button">
+        ×
+      </button>
+
     </div>
 
+    <div id="profilePhotoPreview" class="profile-photo-preview">
+      Z
+    </div>
+
+    <label class="field-label" for="profilePhotoInput">
+      FOTO PROFIL
+    </label>
+
+    <input
+      id="profilePhotoInput"
+      type="file"
+      accept="image/*"
+    >
+
     <label class="field-label" for="profileName">NAMA</label>
-    <input id="profileName" placeholder="Nama">
+
+    <input id="profileName" maxlength="40" placeholder="Nama">
 
     <label class="field-label" for="profileUsername">USERNAME</label>
-    <input id="profileUsername" placeholder="Username">
+
+    <input id="profileUsername" disabled placeholder="Username">
 
     <label class="field-label" for="profileBio">BIO</label>
-    <input id="profileBio" placeholder="Ceritakan tentang dirimu">
 
-    <button id="saveProfile" class="primary-btn" type="button">SIMPAN PERUBAHAN</button>
+    <textarea
+      id="profileBio"
+      maxlength="160"
+      placeholder="Ceritakan tentang dirimu"
+    ></textarea>
+
+    <button id="saveProfile" class="primary-btn" type="button">
+      SIMPAN PERUBAHAN
+    </button>
+
   </div>
+
 </div>
 
-<!-- ADMIN MODAL -->
-<div id="adminScreen" class="modal" hidden>
-  <div class="modal-card admin-card">
+
+<!-- ==================================================
+     STATUS MODAL
+================================================== -->
+
+<div id="statusModal" class="modal" hidden>
+
+  <div class="modal-card">
+
     <div class="modal-heading">
+
+      <div>
+        <div class="eyebrow">YOUR MOMENT</div>
+        <h2>Buat status</h2>
+      </div>
+
+      <button id="closeStatus" class="modal-close" type="button">
+        ×
+      </button>
+
+    </div>
+
+    <textarea
+      id="statusInput"
+      maxlength="500"
+      placeholder="Apa yang sedang kamu pikirkan?"
+    ></textarea>
+
+    <button id="publishStatus" class="primary-btn" type="button">
+      PUBLIKASIKAN STATUS
+    </button>
+
+  </div>
+
+</div>
+
+
+<!-- ==================================================
+     ADMIN PANEL
+================================================== -->
+
+<div id="adminScreen" class="modal" hidden>
+
+  <div class="modal-card admin-card">
+
+    <div class="modal-heading">
+
       <div>
         <div class="eyebrow">CONTROL CENTER</div>
         <h2>Admin Control</h2>
       </div>
-      <button id="closeAdmin" class="secondary-btn" type="button">Tutup</button>
+
+      <button id="closeAdmin" class="secondary-btn" type="button">
+        Tutup
+      </button>
+
     </div>
 
     <h3>Kelola pengguna</h3>
-    <input id="adminSearch" placeholder="UID pengguna">
-    <button id="findAdminUser" class="primary-btn" type="button">CARI PENGGUNA</button>
+
+    <input
+      id="adminSearch"
+      placeholder="Username pengguna"
+    >
+
+    <button id="findAdminUser" class="primary-btn" type="button">
+      CARI PENGGUNA
+    </button>
+
     <div id="adminUserResult"></div>
 
     <h3>Permohonan banding</h3>
+
     <div id="appealList"></div>
+
   </div>
+
 </div>
 
-<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- ==================================================
+     LINK PHONE MODAL
+================================================== -->
+
+<div id="linkPhoneModal" class="modal" hidden>
+
+  <div class="modal-card">
+
+    <div class="modal-heading">
+
+      <div>
+        <div class="eyebrow">PHONE VERIFICATION</div>
+        <h2>Hubungkan nomor HP</h2>
+      </div>
+
+      <button id="closeLinkPhone" class="modal-close" type="button">
+        ×
+      </button>
+
+    </div>
+
+    <div id="linkPhoneError" class="error"></div>
+
+    <label class="field-label" for="linkPhoneNumber">
+      NOMOR HP
+    </label>
+
+    <input
+      id="linkPhoneNumber"
+      type="tel"
+      placeholder="+6281234567890"
+    >
+
+    <button id="sendLinkPhoneOtp" class="primary-btn" type="button">
+      KIRIM OTP
+    </button>
+
+    <div id="linkPhoneOtpPanel" hidden>
+
+      <label class="field-label" for="linkPhoneOtp">
+        KODE OTP
+      </label>
+
+      <input
+        id="linkPhoneOtp"
+        type="text"
+        maxlength="6"
+        inputmode="numeric"
+        placeholder="6 digit kode"
+      >
+
+      <button id="verifyLinkPhoneOtp" class="primary-btn" type="button">
+        VERIFIKASI NOMOR
+      </button>
+
+    </div>
+
+    <div id="link-recaptcha-container"></div>
+
+  </div>
+
+</div>
+
+
+<!-- TOAST -->
+<div
+  id="toast"
+  class="toast"
+  role="status"
+  aria-live="polite"
+></div>
+
+
+<!-- ==================================================
+     PAGE SCRIPT
+================================================== -->
 
 <script>
-const loginMode = document.getElementById("loginMode");
-const registerMode = document.getElementById("registerMode");
+(() => {
+  const loginMode = document.getElementById("loginMode");
+  const registerMode = document.getElementById("registerMode");
 
-document.getElementById("showRegister").onclick = () => {
-  loginMode.hidden = true;
-  registerMode.hidden = false;
-  document.getElementById("authError").textContent = "";
-  document.getElementById("registerError").textContent = "";
-};
+  document.getElementById("showRegister").addEventListener("click", () => {
+    loginMode.hidden = true;
+    registerMode.hidden = false;
 
-document.getElementById("showLogin").onclick = () => {
-  registerMode.hidden = true;
-  loginMode.hidden = false;
-  document.getElementById("authError").textContent = "";
-  document.getElementById("registerError").textContent = "";
-};
+    document.getElementById("authError").textContent = "";
+    document.getElementById("registerError").textContent = "";
+  });
+
+  document.getElementById("showLogin").addEventListener("click", () => {
+    registerMode.hidden = true;
+    loginMode.hidden = false;
+
+    document.getElementById("authError").textContent = "";
+    document.getElementById("registerError").textContent = "";
+  });
+
+  document.getElementById("closeStatus").addEventListener("click", () => {
+    document.getElementById("statusModal").hidden = true;
+  });
+
+  document.getElementById("closeLinkPhone").addEventListener("click", () => {
+    document.getElementById("linkPhoneModal").hidden = true;
+  });
+})();
 </script>
 
 <script type="module" src="app.js"></script>
+
 </body>
 </html>
