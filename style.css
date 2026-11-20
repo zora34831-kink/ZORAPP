@@ -3612,3 +3612,122 @@ select,
     pointer-events: auto !important;
   }
 }
+
+/* =========================================
+   ZORAAPP — LOGIN SCROLL & COPYRIGHT FIX
+========================================= */
+
+html {
+  min-height: 100%;
+  height: auto !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+body {
+  min-height: 100%;
+  height: auto !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+.auth-screen {
+  width: 100%;
+  min-height: 100vh !important;
+  min-height: 100dvh !important;
+  height: auto !important;
+  box-sizing: border-box;
+  overflow: visible !important;
+
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start !important;
+
+  padding: 30px 18px calc(24px + env(safe-area-inset-bottom)) !important;
+  gap: 20px;
+}
+
+.auth-card {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 440px;
+  box-sizing: border-box;
+  margin: 20px auto 0 !important;
+  overflow: visible !important;
+}
+
+/* Tulisan copyright di dalam kartu */
+.auth-card > .eyebrow {
+  display: block !important;
+  width: 100%;
+  height: auto !important;
+  min-height: 18px;
+  box-sizing: border-box;
+
+  position: relative !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+
+  color: var(--accent, #8b9cff) !important;
+  font-size: 10px !important;
+  font-weight: 700;
+  line-height: 1.7 !important;
+  letter-spacing: 1px;
+  text-align: center;
+
+  white-space: normal !important;
+  overflow: visible !important;
+  overflow-wrap: anywhere;
+  margin: 12px 0 !important;
+}
+
+/* Footer bagian paling bawah */
+.auth-footer {
+  position: relative !important;
+  inset: auto !important;
+  transform: none !important;
+
+  display: block !important;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 440px;
+
+  visibility: visible !important;
+  opacity: 1 !important;
+
+  text-align: center;
+  color: var(--text-muted, #9299aa) !important;
+  font-size: 10px;
+  line-height: 1.7;
+  letter-spacing: 1.3px;
+
+  margin: 10px auto 0 !important;
+  padding: 10px 0 5px;
+  pointer-events: none;
+}
+
+/* Pastikan elemen form tidak terpotong */
+#loginMode,
+#registerMode,
+#emailLoginPanel,
+#phoneLoginPanel {
+  overflow: visible !important;
+}
+
+/* Khusus layar HP */
+@media (max-width: 600px) {
+  .auth-screen {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    padding-top: 24px !important;
+  }
+
+  .auth-card {
+    margin-top: 12px !important;
+  }
+
+  .auth-footer {
+    margin-bottom: 10px !important;
+  }
+}
