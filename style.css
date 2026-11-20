@@ -3731,3 +3731,24 @@ body {
     margin-bottom: 10px !important;
   }
 }
+
+/* FIX: LOGIN DAN HALAMAN UTAMA ZORAAPP */
+#authScreen[hidden],
+#appScreen[hidden] {
+  display: none !important;
+}
+
+#authScreen:not([hidden]) {
+  display: flex !important;
+}
+
+#appScreen:not([hidden]) {
+  display: flex !important;
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100dvh !important;
+  overflow: hidden !important;
+  z-index: 100 !important;
+}
