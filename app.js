@@ -1,4 +1,3 @@
-
 import { auth, db, storage, rtdb } from "./firebase.js";
 
 import {
@@ -683,7 +682,12 @@ function renderProfile() {
   if (!profile || !user) return;
 
   const name = profile.name || "Pengguna";
+  const username = profile.username || "username";
   const photo = profile.photoURL || "";
+
+  if ($("headerUsername")) {
+    $("headerUsername").textContent = "@" + username;
+  }
 
   if ($("myName")) $("myName").textContent = name;
   if ($("myEmail")) $("myEmail").textContent = profile.email || "";
@@ -930,7 +934,14 @@ function openPage(pageId) {
     button.classList.toggle("active", button.dataset.page === pageId);
   });
 
-  $("appScreen")?.classList.remove("mobile-chat-open");
+  $("appScreen")?.classList.remove("mobile-chat-open", "chat-open");
+
+  hide($("chatPanel"));
+  show($("emptyChat"));
+
+  activeId = null;
+  activeType = null;
+  activeInfo = null;
 
   if ($("contentArea")) {
     $("contentArea").scrollTop = 0;
@@ -944,7 +955,16 @@ document.querySelectorAll(".nav-button[data-page]").forEach(button => {
 });
 
 on("backToChats", "click", () => {
-  $("appScreen")?.classList.remove("mobile-chat-open");
+  clearChatListeners();
+
+  $("appScreen")?.classList.remove("mobile-chat-open", "chat-open");
+
+  hide($("chatPanel"));
+  show($("emptyChat"));
+
+  activeId = null;
+  activeType = null;
+  activeInfo = null;
 });
 
 /* =========================================
@@ -1517,6 +1537,7 @@ function openConversation(id, type, info = {}) {
 
   show($("chatPanel"));
   hide($("emptyChat"));
+  $("appScreen")?.classList.add("chat-open");
 
   $("chatName").textContent = info.name || "Percakapan";
 
