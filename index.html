@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10131d">
   <meta name="description" content="ZORAAPP — Connect your world">
-  <title>ZORAAPP — Social Messenger</title>
+  <title>ZORAAPP</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,10 +17,7 @@
 
 <body class="theme-dark">
 
-<!-- ==================================================
-     AUTHENTICATION
-================================================== -->
-
+<!-- AUTHENTICATION -->
 <section id="authScreen" class="auth-screen">
   <div class="auth-card">
 
@@ -38,26 +35,24 @@
       <div id="authError" class="error" role="alert"></div>
 
       <div class="auth-tabs">
-      
-<div class="auth-tabs">
-  <button id="emailLoginTab" class="auth-tab active" type="button">
-    <span class="auth-tab-icon">✉</span>
-    <span class="auth-tab-content">
-      <strong>Email</strong>
-      <small>Masuk dengan email</small>
-    </span>
-    <span class="auth-tab-check">✓</span>
-  </button>
+        <button id="emailLoginTab" class="auth-tab active" type="button">
+          <span class="auth-tab-icon">✉</span>
+          <span class="auth-tab-content">
+            <strong>Email</strong>
+            <small>Masuk dengan email</small>
+          </span>
+          <span class="auth-tab-check">✓</span>
+        </button>
 
-  <button id="phoneLoginTab" class="auth-tab" type="button">
-    <span class="auth-tab-icon">⌕</span>
-    <span class="auth-tab-content">
-      <strong>Nomor HP</strong>
-      <small>Verifikasi melalui SMS</small>
-    </span>
-    <span class="auth-tab-check">✓</span>
-  </button>
-</div>
+        <button id="phoneLoginTab" class="auth-tab" type="button">
+          <span class="auth-tab-icon">⌕</span>
+          <span class="auth-tab-content">
+            <strong>Nomor HP</strong>
+            <small>Verifikasi melalui SMS</small>
+          </span>
+          <span class="auth-tab-check">✓</span>
+        </button>
+      </div>
 
       <!-- EMAIL LOGIN -->
       <div id="emailLoginPanel">
@@ -211,10 +206,7 @@
 </section>
 
 
-<!-- ==================================================
-     PROFILE SETUP FOR PHONE USERS
-================================================== -->
-
+<!-- PROFILE SETUP FOR PHONE USERS -->
 <div id="phoneProfileModal" class="modal" hidden>
   <div class="modal-card">
 
@@ -251,15 +243,11 @@
 </div>
 
 
-<!-- ==================================================
-     ACCOUNT STATUS
-================================================== -->
-
+<!-- ACCOUNT STATUS -->
 <section id="holdScreen" class="special-screen hold-screen" hidden>
   <div class="special-card">
 
     <div class="status-symbol warning-symbol">!</div>
-
     <div class="eyebrow">ACCOUNT SECURITY</div>
 
     <h2>AKUN DIBATASI SEMENTARA</h2>
@@ -298,7 +286,6 @@
   <div class="special-card">
 
     <div class="status-symbol success-symbol">✓</div>
-
     <div class="eyebrow">ACCOUNT RECOVERY</div>
 
     <h2>AKUN TELAH DIPULIHKAN</h2>
@@ -323,7 +310,6 @@
   <div class="special-card">
 
     <div class="status-symbol danger-symbol">×</div>
-
     <div class="eyebrow">ACCOUNT STATUS</div>
 
     <h2>AKUN DINONAKTIFKAN</h2>
@@ -345,10 +331,7 @@
 </section>
 
 
-<!-- ==================================================
-     MAIN APPLICATION
-================================================== -->
-
+<!-- MAIN APPLICATION -->
 <div id="appScreen" class="app" hidden>
 
   <!-- HEADER -->
@@ -416,13 +399,12 @@
 
 
     <!-- PAGE CONTENT -->
-    <section class="content-area">
+    <section class="content-area" id="contentArea">
 
       <!-- CHAT PAGE -->
       <section id="chatsPage" class="page active">
 
         <div class="page-heading">
-
           <div>
             <div class="eyebrow">MESSAGES</div>
             <h2>Chat</h2>
@@ -432,7 +414,6 @@
           <button id="newChatBtn" class="round-action" type="button">
             +
           </button>
-
         </div>
 
         <input
@@ -443,7 +424,6 @@
         >
 
         <div id="searchResults"></div>
-
         <div id="chatList" class="list-container"></div>
 
       </section>
@@ -461,7 +441,6 @@
         </div>
 
         <div class="panel">
-
           <h3>Status saya</h3>
 
           <button id="createStatusBtn" class="primary-btn" type="button">
@@ -469,15 +448,11 @@
           </button>
 
           <div id="myStatuses"></div>
-
         </div>
 
         <div class="panel">
-
           <h3>Pembaruan teman</h3>
-
           <div id="statusList"></div>
-
         </div>
 
       </section>
@@ -487,7 +462,6 @@
       <section id="communitiesPage" class="page" hidden>
 
         <div class="page-heading">
-
           <div>
             <div class="eyebrow">COMMUNITY</div>
             <h2>Komunitas</h2>
@@ -497,7 +471,6 @@
           <button id="createGroupBtn" class="round-action" type="button">
             +
           </button>
-
         </div>
 
         <div id="groupList" class="list-container"></div>
@@ -509,7 +482,6 @@
       <section id="channelsPage" class="page" hidden>
 
         <div class="page-heading">
-
           <div>
             <div class="eyebrow">BROADCAST</div>
             <h2>Saluran</h2>
@@ -519,7 +491,6 @@
           <button id="createChannelBtn" class="round-action" type="button">
             +
           </button>
-
         </div>
 
         <div id="channelList" class="list-container"></div>
@@ -559,7 +530,6 @@
         </div>
 
         <div class="settings-profile">
-
           <div class="avatar" id="myAvatar">Z</div>
 
           <div class="profile-info">
@@ -567,7 +537,6 @@
             <small id="myEmail"></small>
             <small id="myPhone"></small>
           </div>
-
         </div>
 
         <div class="settings-section-title">AKUN</div>
@@ -603,22 +572,14 @@
     </section>
 
 
-    <!-- ==================================================
-         CONVERSATION AREA
-    ================================================== -->
-
+    <!-- CONVERSATION AREA -->
     <section class="conversation-area">
 
       <div id="emptyChat" class="empty-state">
-
         <div class="empty-logo">Z</div>
-
         <div class="eyebrow">ZORAAPP MESSENGER</div>
-
         <h2>Mulai percakapan</h2>
-
         <p>Pilih pengguna untuk mulai berkirim pesan.</p>
-
       </div>
 
 
@@ -652,7 +613,7 @@
 
         <div id="messages" class="messages"></div>
 
-        <div class="composer">
+        <div class="composer" id="composer">
 
           <label class="attach-button" title="Kirim gambar">
             +
@@ -734,16 +695,11 @@
 </div>
 
 
-<!-- ==================================================
-     PROFILE MODAL
-================================================== -->
-
+<!-- PROFILE MODAL -->
 <div id="profileModal" class="modal" hidden>
-
   <div class="modal-card">
 
     <div class="modal-heading">
-
       <div>
         <div class="eyebrow">YOUR ACCOUNT</div>
         <h2>Edit profil</h2>
@@ -752,7 +708,6 @@
       <button id="closeProfile" class="modal-close" type="button">
         ×
       </button>
-
     </div>
 
     <div id="profilePhotoPreview" class="profile-photo-preview">
@@ -770,11 +725,9 @@
     >
 
     <label class="field-label" for="profileName">NAMA</label>
-
     <input id="profileName" maxlength="40" placeholder="Nama">
 
     <label class="field-label" for="profileUsername">USERNAME</label>
-
     <input id="profileUsername" disabled placeholder="Username">
 
     <label class="field-label" for="profileBio">BIO</label>
@@ -790,20 +743,14 @@
     </button>
 
   </div>
-
 </div>
 
 
-<!-- ==================================================
-     STATUS MODAL
-================================================== -->
-
+<!-- STATUS MODAL -->
 <div id="statusModal" class="modal" hidden>
-
   <div class="modal-card">
 
     <div class="modal-heading">
-
       <div>
         <div class="eyebrow">YOUR MOMENT</div>
         <h2>Buat status</h2>
@@ -812,7 +759,6 @@
       <button id="closeStatus" class="modal-close" type="button">
         ×
       </button>
-
     </div>
 
     <textarea
@@ -826,20 +772,14 @@
     </button>
 
   </div>
-
 </div>
 
 
-<!-- ==================================================
-     ADMIN PANEL
-================================================== -->
-
+<!-- ADMIN PANEL -->
 <div id="adminScreen" class="modal" hidden>
-
   <div class="modal-card admin-card">
 
     <div class="modal-heading">
-
       <div>
         <div class="eyebrow">CONTROL CENTER</div>
         <h2>Admin Control</h2>
@@ -848,7 +788,6 @@
       <button id="closeAdmin" class="secondary-btn" type="button">
         Tutup
       </button>
-
     </div>
 
     <h3>Kelola pengguna</h3>
@@ -869,20 +808,14 @@
     <div id="appealList"></div>
 
   </div>
-
 </div>
 
 
-<!-- ==================================================
-     LINK PHONE MODAL
-================================================== -->
-
+<!-- LINK PHONE MODAL -->
 <div id="linkPhoneModal" class="modal" hidden>
-
   <div class="modal-card">
 
     <div class="modal-heading">
-
       <div>
         <div class="eyebrow">PHONE VERIFICATION</div>
         <h2>Hubungkan nomor HP</h2>
@@ -891,7 +824,6 @@
       <button id="closeLinkPhone" class="modal-close" type="button">
         ×
       </button>
-
     </div>
 
     <div id="linkPhoneError" class="error"></div>
@@ -933,7 +865,6 @@
     <div id="link-recaptcha-container"></div>
 
   </div>
-
 </div>
 
 
@@ -946,10 +877,7 @@
 ></div>
 
 
-<!-- ==================================================
-     PAGE SCRIPT
-================================================== -->
-
+<!-- PAGE SCRIPT -->
 <script>
 (() => {
   const loginMode = document.getElementById("loginMode");
