@@ -1499,3 +1499,116 @@ h1, h2, h3 {
     gap: 6px;
   }
 }
+
+/* ZORAAPP PREMIUM BUTTON SYSTEM */
+
+button,
+.btn,
+.action-btn {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(155, 166, 255, .16);
+  border-radius: 15px;
+  transition:
+    transform .2s ease,
+    background .2s ease,
+    border-color .2s ease,
+    box-shadow .2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled):active,
+.btn:active,
+.action-btn:active {
+  transform: scale(.96);
+}
+
+button:focus-visible,
+.btn:focus-visible,
+.action-btn:focus-visible {
+  outline: 2px solid #8795ff;
+  outline-offset: 3px;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* Tombol utama */
+button.primary,
+.btn-primary,
+button[type="submit"] {
+  background: linear-gradient(
+    135deg,
+    #8794ff,
+    #6676ed
+  );
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.2);
+  box-shadow:
+    0 5px 16px rgba(104, 119, 239, .2),
+    inset 0 1px 0 rgba(255,255,255,.22);
+}
+
+/* Tombol sekunder */
+button.secondary,
+.btn-secondary {
+  background: rgba(255,255,255,.045);
+  color: #e8eaff;
+  border: 1px solid rgba(255,255,255,.09);
+}
+
+/* Tombol hapus */
+button.danger,
+.btn-danger {
+  background: rgba(239, 83, 112, .1);
+  color: #ff8298;
+  border-color: rgba(239, 83, 112, .2);
+}
+
+/* Tombol tambah */
+button.add-btn,
+button.plus-btn {
+  border-radius: 20px;
+  background: linear-gradient(145deg, #8997ff, #6878ec);
+  color: white;
+  box-shadow: 0 8px 22px rgba(104, 119, 239, .22);
+}
+
+/* Efek kilau halus */
+button::after,
+.btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 20%,
+    rgba(255,255,255,.09) 48%,
+    transparent 75%
+  );
+  transform: translateX(-110%);
+  transition: transform .5s ease;
+  pointer-events: none;
+}
+
+button:active::after,
+.btn:active::after {
+  transform: translateX(110%);
+}
+
+/* Navigasi bawah */
+.bottom-nav button,
+nav button {
+  border-radius: 15px;
+  transition: .2s ease;
+}
+
+.bottom-nav button.active,
+nav button.active {
+  background: rgba(126, 140, 255, .14);
+  border: 1px solid rgba(139, 151, 255, .3);
+  color: #aab5ff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
