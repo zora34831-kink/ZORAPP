@@ -3448,3 +3448,167 @@ select,
     pointer-events: auto !important;
   }
 }
+
+
+/* =========================================
+   ZORAAPP — MAIN APP CLICK FIX
+========================================= */
+
+/* Pastikan area aplikasi memiliki susunan layer */
+#appScreen {
+  position: relative;
+  isolation: isolate;
+}
+
+.main-layout {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Navigasi dan konten harus bisa menerima sentuhan */
+.side-nav,
+.content-area,
+.mobile-nav {
+  pointer-events: auto !important;
+}
+
+.side-nav {
+  position: relative;
+  z-index: 60 !important;
+}
+
+.content-area {
+  position: relative;
+  z-index: 40 !important;
+}
+
+.mobile-nav {
+  z-index: 10000 !important;
+  pointer-events: auto !important;
+}
+
+.mobile-nav button,
+.side-nav button,
+.content-area button {
+  pointer-events: auto !important;
+  touch-action: manipulation;
+  position: relative;
+}
+
+/* Conversation area tidak boleh menutupi seluruh aplikasi */
+.conversation-area {
+  pointer-events: none !important;
+}
+
+/* Hanya panel percakapan yang menerima klik */
+#chatPanel:not([hidden]) {
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 50;
+}
+
+#chatPanel[hidden],
+#emptyChat {
+  pointer-events: none !important;
+}
+
+#chatPanel button,
+#chatPanel input,
+#chatPanel textarea,
+#chatPanel label {
+  pointer-events: auto !important;
+}
+
+/* Semua elemen tersembunyi benar-benar disembunyikan */
+[hidden] {
+  display: none !important;
+}
+
+/* Modal */
+.modal[hidden],
+#adminScreen[hidden] {
+  display: none !important;
+}
+
+.modal:not([hidden]),
+#adminScreen:not([hidden]) {
+  pointer-events: auto !important;
+  z-index: 20000 !important;
+}
+
+/* Toast tidak menghalangi tombol */
+.toast {
+  pointer-events: none !important;
+}
+
+/* =========================================
+   LOGIN COPYRIGHT FIX
+========================================= */
+
+.auth-screen {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-bottom: 75px !important;
+  box-sizing: border-box;
+}
+
+.auth-card > .eyebrow {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: relative;
+  z-index: 10;
+  color: var(--accent, #8b9cff) !important;
+  font-size: 10px !important;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  line-height: 1.6;
+  margin: 12px 0 8px;
+  text-align: center;
+  overflow: visible;
+}
+
+.auth-footer {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: fixed !important;
+  z-index: 10001 !important;
+  left: 0;
+  right: 0;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  text-align: center;
+  color: var(--text-muted, #9299aa) !important;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  pointer-events: none;
+}
+
+/* Mobile */
+@media (max-width: 800px) {
+  #appScreen .main-layout {
+    position: relative;
+    z-index: 1;
+  }
+
+  #appScreen .content-area {
+    position: relative;
+    z-index: 40 !important;
+  }
+
+  #appScreen .mobile-nav {
+    position: fixed;
+    z-index: 10000 !important;
+    pointer-events: auto !important;
+  }
+
+  #appScreen .conversation-area {
+    z-index: 30 !important;
+    pointer-events: none !important;
+  }
+
+  #appScreen #chatPanel:not([hidden]) {
+    pointer-events: auto !important;
+  }
+}
