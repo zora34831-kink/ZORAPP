@@ -498,6 +498,8 @@ on("sendPhoneOtp", "click", async () => {
   message("authError");
 
   try {
+
+  
     clearCaptcha();
 
     recaptcha = makeCaptcha("recaptcha-container");
@@ -998,6 +1000,7 @@ on("verifyAccountBtn", "click", async () => {
     toast("Gagal memeriksa akun: " + error.message);
   }
 });
+
 
 /* =========================================
    NAVIGATION
@@ -2328,7 +2331,6 @@ async function loadAppeals() {
   element.textContent = "Memuat...";
 
   try {
-    // Tidak menggunakan orderBy agar tidak memerlukan composite index.
     const results = await getDocs(
       query(
         collection(db, "appeals"),
