@@ -1498,7 +1498,6 @@ async function logout() {
 }
 
 async function enterApp() {
-async function enterApp() {
   profile = await loadProfile(user.uid);
 
   if (!profile) {
